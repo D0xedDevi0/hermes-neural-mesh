@@ -1,0 +1,8 @@
+name: neural-mesh
+version: 0.39.0
+description: "NEURAL_MESH for Hermes — self-organizing, self-forgetting long-term memory with bi-temporal recall. Resonance + BM25 retrieval over an auto-linking typed graph, point-in-time recall (mesh_asof), supersession instead of overwrite, and memory-poisoning quarantine. Pure Python, in-process, stdlib only: no API keys, no network, no compiled binary, no credential files."
+requires_hermes: ">=0.22.0"
+hooks:
+  - on_session_end
+  - on_pre_compress
+  - on_memory_write

@@ -1,0 +1,111 @@
+"""NEURAL_MESH — a self-organizing, self-forgetting agentic memory mesh.
+
+Pure-stdlib core (no pip installs required to run the demo).
+
+The mesh models memory the way cognition actually works:
+  * FIVE memory types with separate handling (CoALA / 2026 survey)
+  * A MESH TOPOLOGY where nodes self-link by meaning (HippoRAG hippocampal indexing)
+  * RESONANCE retrieval: a query seeds nodes, activation spreads to linked
+    neighbours with decay — the differentiator vs flat cosine search
+  * LANES: short-term HOT vs long-term COLD, bridged by a consolidation bus
+  * POINTER protocol: big tool outputs never enter context (only a pointer does)
+  * SLEEP cycle: replay -> strengthen -> PRUNE weak/aged/low-trust traces
+  * PROSPECTIVE memory: intentions & futures, not just the past
+
+Run `python -m neural_mesh.demo` to see it work.
+"""
+
+from .core import Mesh, MemoryType
+from .meshfile import export_mesh, import_mesh
+from .sharing import merge_peer_mesh, consensus_rank, PeerPolicy, export_for_peer
+from .lora_dataset import write_jsonl, write_hf_jsonl, write_weights, summarize
+from .dream import dream, recall_associative
+from .prospective import (
+    upcoming, due_rank, snooze, expired,
+)
+from .budget import select_fit, token_estimate, default_value_score, fit_summary
+from .reader import Reader, ExtractiveReader, CallableReader
+from .lifecycle import MemoryLifecycle
+from .pointer import PointerStore, store_big_output
+from .integrations.helixa_provenance import (
+    HelixaStamp, stamp_node, verify_stamp, aura_trust_weight,
+    export_manifest, make_stamp,
+)
+from .onchain_provenance import (
+    IntuitionDeploymentReceipt, IntuitionTripleReceipt,
+    parse_intuition_receipts, load_intuition_receipts,
+    receipt_memory_payloads, ingest_intuition_receipts,
+)
+from .proof_cards import (
+    proof_card, node_card, recall_with_proofs,
+    answer_with_proofs, citation_for_proof,
+)
+from .server_security import RateLimiter, auth_ok, origin_allowed, safe_path
+from .reader_llm import LLMReader
+from .eval import QAJudge, run_qa_eval, load_test_set
+from .bonds import BondLedger, settlement_verdict
+from .bond_escrow import BondEscrow, build_escrow_calldata, escrow_status
+from .temporal import valid_at, snapshot, recall_asof, history, resolve_at
+from .reconcile import (
+    ReconcileGate, ReconcileReport, Verdict, VerdictCode,
+    MATCH, MISMATCH, UNVERIFIABLE,
+)
+from .actguard import ExecutionGuard, ExecutionVerdict
+from .meta import (content_hash, record_provenance, confidence, node_confidence,
+                   census, coverage, known_unknowns)
+from .consensus import agent_believe, reach_consensus
+from .exchange import (export_artifact, verify_artifact, import_artifact,
+                       serialize, deserialize)
+from .curriculum import learn_plan, record_attempt, gaps_remaining
+# Lazy imports for optional heavy deps — only loaded when actually used,
+# so `pip install neural-mesh` works without eth-account / yantrikdb.
+_LAZY = {}
+
+def __getattr__(name):
+    if name == "HelixaSigner":
+        if "HelixaSigner" not in _LAZY:
+            from .integrations.helixa_signer import HelixaSigner as _HS
+            _LAZY["HelixaSigner"] = _HS
+        return _LAZY["HelixaSigner"]
+    if name == "YantrikDBBridge":
+        if "YantrikDBBridge" not in _LAZY:
+            from .integrations.yantrikdb_bridge import YantrikDBBridge as _YB
+            _LAZY["YantrikDBBridge"] = _YB
+        return _LAZY["YantrikDBBridge"]
+    if name == "PaidRecallGate":
+        if "PaidRecallGate" not in _LAZY:
+            from .x402_recall import PaidRecallGate as _PRG
+            _LAZY["PaidRecallGate"] = _PRG
+        return _LAZY["PaidRecallGate"]
+    raise AttributeError(f"module 'neural_mesh' has no attribute {name!r}")
+
+__all__ = ["Mesh", "MemoryType", "export_mesh", "import_mesh",
+           "merge_peer_mesh", "consensus_rank", "PeerPolicy", "export_for_peer",
+           "write_jsonl", "write_hf_jsonl", "write_weights", "summarize",
+           "dream", "recall_associative", "Reader", "ExtractiveReader",
+           "CallableReader", "MemoryLifecycle", "PointerStore", "store_big_output",
+           "HelixaStamp", "stamp_node", "verify_stamp", "aura_trust_weight",
+           "export_manifest", "make_stamp",
+           "IntuitionDeploymentReceipt", "IntuitionTripleReceipt",
+           "parse_intuition_receipts", "load_intuition_receipts",
+           "receipt_memory_payloads", "ingest_intuition_receipts",
+           "proof_card", "node_card", "recall_with_proofs",
+           "answer_with_proofs", "citation_for_proof",
+           "RateLimiter", "auth_ok", "origin_allowed", "safe_path",
+           "LLMReader", "QAJudge", "run_qa_eval", "load_test_set",
+           "HelixaSigner",
+           "PaidRecallGate", "TIERS", "SERVICE_NAME", "verify_receipt_onchain",
+           "RECEIPT_CONTRACT", "FEE_RECIPIENT", "BASE_RPC",
+           "BondLedger", "settlement_verdict",
+           "BondEscrow", "build_escrow_calldata", "escrow_status",
+           "valid_at", "snapshot", "recall_asof", "history", "resolve_at",
+           "ReconcileGate", "ReconcileReport", "Verdict", "VerdictCode",
+           "MATCH", "MISMATCH", "UNVERIFIABLE",
+           "ExecutionGuard", "ExecutionVerdict",
+           "content_hash", "record_provenance", "confidence", "node_confidence",
+           "census", "coverage", "known_unknowns",
+           "agent_believe", "reach_consensus",
+           "export_artifact", "verify_artifact", "import_artifact",
+           "serialize", "deserialize",
+           "learn_plan", "record_attempt", "gaps_remaining"]
+__version__ = "0.39.0"

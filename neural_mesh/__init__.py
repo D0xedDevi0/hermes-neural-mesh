@@ -27,10 +27,11 @@ from .budget import select_fit, token_estimate, default_value_score, fit_summary
 from .reader import Reader, ExtractiveReader, CallableReader
 from .lifecycle import MemoryLifecycle
 from .pointer import PointerStore, store_big_output
-from .integrations.helixa_provenance import (
-    HelixaStamp, stamp_node, verify_stamp, aura_trust_weight,
-    export_manifest, make_stamp,
-)
+# NOTE (vendoring): upstream also exports a Helixa provenance/stamp API from
+# .integrations.helixa_provenance at this point. That subpackage is deliberately NOT vendored
+# — its signer loads a private key out of a credential file, which a plugin installed into a
+# memory slot must never do — so the import and its names are removed rather than shipped.
+# See PROVENANCE.md; `Mesh`, the store, and every recall path are unaffected.
 from .onchain_provenance import (
     IntuitionDeploymentReceipt, IntuitionTripleReceipt,
     parse_intuition_receipts, load_intuition_receipts,
@@ -62,16 +63,6 @@ from .curriculum import learn_plan, record_attempt, gaps_remaining
 _LAZY = {}
 
 def __getattr__(name):
-    if name == "HelixaSigner":
-        if "HelixaSigner" not in _LAZY:
-            from .integrations.helixa_signer import HelixaSigner as _HS
-            _LAZY["HelixaSigner"] = _HS
-        return _LAZY["HelixaSigner"]
-    if name == "YantrikDBBridge":
-        if "YantrikDBBridge" not in _LAZY:
-            from .integrations.yantrikdb_bridge import YantrikDBBridge as _YB
-            _LAZY["YantrikDBBridge"] = _YB
-        return _LAZY["YantrikDBBridge"]
     if name == "PaidRecallGate":
         if "PaidRecallGate" not in _LAZY:
             from .x402_recall import PaidRecallGate as _PRG
@@ -84,8 +75,6 @@ __all__ = ["Mesh", "MemoryType", "export_mesh", "import_mesh",
            "write_jsonl", "write_hf_jsonl", "write_weights", "summarize",
            "dream", "recall_associative", "Reader", "ExtractiveReader",
            "CallableReader", "MemoryLifecycle", "PointerStore", "store_big_output",
-           "HelixaStamp", "stamp_node", "verify_stamp", "aura_trust_weight",
-           "export_manifest", "make_stamp",
            "IntuitionDeploymentReceipt", "IntuitionTripleReceipt",
            "parse_intuition_receipts", "load_intuition_receipts",
            "receipt_memory_payloads", "ingest_intuition_receipts",
@@ -93,7 +82,6 @@ __all__ = ["Mesh", "MemoryType", "export_mesh", "import_mesh",
            "answer_with_proofs", "citation_for_proof",
            "RateLimiter", "auth_ok", "origin_allowed", "safe_path",
            "LLMReader", "QAJudge", "run_qa_eval", "load_test_set",
-           "HelixaSigner",
            "PaidRecallGate", "TIERS", "SERVICE_NAME", "verify_receipt_onchain",
            "RECEIPT_CONTRACT", "FEE_RECIPIENT", "BASE_RPC",
            "BondLedger", "settlement_verdict",

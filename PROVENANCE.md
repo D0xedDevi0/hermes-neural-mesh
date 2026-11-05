@@ -10,7 +10,7 @@ plugin is dependency-free and reviewable line by line.
 | Upstream version | `neural-mesh` 0.39.0 |
 | License | MIT (see `LICENSE`) |
 | Vendored | `neural_mesh/` — 50 Python files, ~540 KB |
-| Not vendored | `rust_mesh.so` (compiled acceleration), `data/`, `bench/`, `server.py`, the HTTP service, tests and docs of the upstream project |
+| Not vendored | `rust_mesh.so` (compiled acceleration), `neural_mesh/integrations/` (loads a credential file), `data/`, `bench/`, `server.py`, the HTTP service, tests and docs of the upstream project |
 
 ## Why it is vendored rather than declared as a dependency
 
@@ -42,6 +42,20 @@ and the mesh reports its own backend:
 `resonance_backend: python` is that fallback working. Any user who wants the accelerated path
 can install `neural-mesh` from the upstream repository themselves — the plugin does not need
 it and does not fetch it.
+
+## Why `integrations/` is missing
+
+Upstream ships `neural_mesh/integrations/` holding a Helixa signer, a Helixa provenance API, an
+x402 helper and a YantrikDB bridge. The signer loads a private key out of a credential file on
+disk. A catalog plugin must not reach for credential stores, and this plugin's whole claim is
+that it holds no credentials at all — so the subpackage is not vendored, and the core's three
+references to it were removed as well (a top-level import in `neural_mesh/__init__.py`, its two
+lazy `__getattr__` branches, and its `__all__` entries). `scripts/trust_check.py` fails the
+build if the file or a reference to it ever returns.
+
+Nothing on the store/recall path touches it. `Mesh`, `add`, `recall`, `recall_asof`, the
+temporal helpers, resonance and BM25 all import and run without it, which the test suite
+exercises on every run.
 
 ## Keeping it current
 

@@ -6,3 +6,6 @@ __pycache__/
 *.db-wal
 *.db-shm
 config.json
+
+# internal strategy notes — never published
+SCOPE.md

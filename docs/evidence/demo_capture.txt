@@ -1,0 +1,31 @@
+SOURCE LEDGER - raw output of every command the demo renders.
+Trimmed only for image-managed install noise; nothing else altered.
+node 55b99f242eab was superseded by the correction
+
+$ hermes -p nmtest -z Use mesh_remember to store exactly this project fact: our launch date is Nov 11. Then say you have stored it.
+[exit 0]
+Stored — "Launch date is Nov 11." is in NEURAL_MESH as a semantic memory (id 21c7d1a1f35a).
+⚠ install out of sync (venv: out of sync with uv.lock) — this docker-managed install must rebuild the artifact to fix
+
+
+$ hermes -p nmtest -z What is our launch date? Answer from stored memory only, in one short sentence.
+[exit 0]
+Our launch date is Nov 11.
+⚠ install out of sync (venv: out of sync with uv.lock) — this docker-managed install must rebuild the artifact to fix
+
+
+$ tool mesh_remember {"content": "the retry limit for service-3 is 3 attempts", "valid_from": "2025-01-01"}
+Stored in NEURAL_MESH as semantic (id 55b99f242eab): the retry limit for service-3 is 3 attempts
+
+$ tool mesh_remember {"content": "the retry limit for service-3 is 11 attempts", "valid_from": "2026-06-01", "supersedes": "55b99f242eab"}
+Stored in NEURAL_MESH as semantic (id 8f5bdea0fa1e): the retry limit for service-3 is 11 attempts [closed the earlier memory's window at that date]
+
+$ tool mesh_recall {"query": "what is the retry limit for service-3 is?"}
+- [8f5bdea0] the retry limit for service-3 is 11 attempts
+
+$ tool mesh_asof {"query": "what is the retry limit for service-3 is?", "as_of": "2026-03-01"}
+As of 2026-03-01:
+- [55b99f24] the retry limit for service-3 is 3 attempts
+
+$ tool mesh_stats {}
+NEURAL_MESH (neural-mesh): {'total': 1, 'by_type': {'semantic': 1}, 'hot': 1, 'cold': 0, 'quarantined': 0, 'resonance_backend': 'python'} | store: /opt/data/cache/scratch/nm-demo-store-llkuvg2e/neural-mesh/mesh.db

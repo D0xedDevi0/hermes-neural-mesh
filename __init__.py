@@ -479,11 +479,18 @@ class NeuralMeshProvider(MemoryProvider):
                     by="hermes:mesh_remember",
                 )
                 nid = getattr(node, "id", "")
-                closed = self._close_predecessor_window(self._m(), supersedes, start)
-                return (
-                    f"Stored in NEURAL_MESH as {kind} (id {nid}): {content[:160]}"
-                    + (" [closed the earlier memory's window at that date]" if closed else "")
-                )
+                status = self._close_predecessor_window(self._m(), supersedes, start)
+                if status == "closed":
+                    note = " [closed the earlier memory's window at that date]"
+                elif status == "missing":
+                    note = (
+                        " [note: supersedes matched no stored memory, so this was appended "
+                        "rather than replacing anything — an older value may still read as "
+                        "current]"
+                    )
+                else:
+                    note = ""
+                return f"Stored in NEURAL_MESH as {kind} (id {nid}): {content[:160]}{note}"
 
             if tool_name == "mesh_recall":
                 query = str(args.get("query") or "").strip()
@@ -523,8 +530,10 @@ class NeuralMeshProvider(MemoryProvider):
             return f"neural-mesh: {type(exc).__name__}: {exc}"
         return f"neural-mesh: unknown tool {tool_name!r}"
 
-    def _close_predecessor_window(self, mesh: Any, superseded_id: str, start: float) -> bool:
+    def _close_predecessor_window(self, mesh: Any, superseded_id: str, start: float) -> str:
         """Bi-temporal housekeeping the core leaves to its caller.
+
+        Returns 'closed' | 'missing' | 'already' | 'skipped'.
 
         The core closes a superseded fact at *the moment of supersession*, which is right when
         a correction is learned in real time: the old belief was true until now. But when
@@ -534,24 +543,35 @@ class NeuralMeshProvider(MemoryProvider):
         them and ranks by similarity. Measured before this fix: "which value was current then?"
         scored 1/15. After it: 15/15.
 
-        Falls back silently to the core's behaviour if the store API moves; vendoring pins the
-        core, so it cannot move without this being updated with it.
+        'missing' matters as much as 'closed': a ``supersedes`` that matches nothing would
+        otherwise be a silent no-op, leaving two contradictory values reading as current while
+        the caller believes the correction landed.
+
+        Falls back to the core's behaviour if the store API moves; vendoring pins the core, so
+        it cannot move without this being updated with it.
         """
-        if not superseded_id or not start:
-            return False
+        if not superseded_id:
+            return "skipped"
         try:
             old = mesh._load().get(superseded_id)
-            if old is None:
-                return False
-            current = float(getattr(old, "valid_to", 0.0) or 0.0)
-            if current and current <= start:
-                return False  # already closed before the successor began
+        except Exception:
+            return "skipped"
+        if old is None:
+            # a supersedes that matches nothing is a silent no-op at the core, which leaves two
+            # contradictory values reading as current — always worth reporting, date or no date
+            return "missing"
+        if not start:
+            return "skipped"  # no backfilled start, so the core's own close is the right one
+        current = float(getattr(old, "valid_to", 0.0) or 0.0)
+        if current and current <= start:
+            return "already"  # already closed before the successor began
+        try:
             old.valid_to = start
             mesh._save(old)
             mesh._invalidate_cache()
-            return True
+            return "closed"
         except Exception:
-            return False
+            return "skipped"
 
     def _store_path(self) -> str:
         """Where this agent's memory actually lives — reported by mesh_stats so a user can

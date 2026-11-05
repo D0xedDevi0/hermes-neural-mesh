@@ -1,0 +1,21 @@
+{
+  "file": "docs/demo.mp4",
+  "duration_s": 85.0,
+  "codec": "h264",
+  "pix_fmt": "yuv420p",
+  "size": "1600x900",
+  "frames": 2550,
+  "ablation": {
+    "n": 15,
+    "tm_now": 15,
+    "tm_asof": 15,
+    "fl_now": 1,
+    "fl_asof": 1,
+    "asof": "2025-08-01"
+  },
+  "session_rc": [
+    0,
+    0
+  ],
+  "method": "Terminal-style frames rendered offline from real captured output (docs/evidence/demo_capture.txt). Not a screen recording."
+}

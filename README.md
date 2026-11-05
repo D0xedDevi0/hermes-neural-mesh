@@ -20,6 +20,22 @@ mesh_recall("how often does the deploy key rotate?")
 That distinction is the whole point. A flat vector store overwrites the old value and then
 cannot answer the first question at all.
 
+## Watch it
+
+An 85-second walkthrough, rendered offline from real captured output —
+[`docs/demo.mp4`](docs/demo.mp4) ([source ledger](docs/evidence/demo_capture.txt) ·
+[proof](docs/evidence/demo_proof.json)):
+
+1. a real agent session stores a fact, then a **cold process with its session history deleted**
+   answers it from the store;
+2. the same store returns the *current* value and the value that held in March 2026, correctly
+   different;
+3. the measured ablation — 15/15 against a flat store's 1/15.
+
+Nothing in it is a screen recording: the frames are rendered from captured command output and
+every line traces back to the ledger. `scripts/demo_build.py capture` re-runs the real
+commands; `render` rebuilds the cut.
+
 ---
 
 ## What it gives an agent

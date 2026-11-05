@@ -207,6 +207,14 @@ class ProviderTest(unittest.TestCase):
         self.assertIn("parseable", out)
         self.assertNotIn("Traceback", out)
 
+    def test_a_supersedes_that_matches_nothing_says_so(self):
+        """A correction that replaces nothing must not look like it replaced something."""
+        out = self.p.handle_tool_call(
+            "mesh_remember",
+            {"content": "the retry limit for service-3 is 11 attempts", "supersedes": "not-a-real-id"},
+        )
+        self.assertIn("matched no stored memory", out)
+
     # ── thread safety: the failure the live run exposed ─────────────────────────
 
     def test_a_write_from_a_worker_thread_lands_and_is_readable(self):

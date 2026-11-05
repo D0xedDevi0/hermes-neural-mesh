@@ -1,0 +1,28 @@
+{
+  "ablation": {
+    "n": 15,
+    "tm_now": 15,
+    "tm_asof": 15,
+    "fl_now": 1,
+    "fl_asof": 1,
+    "asof": "2025-08-01"
+  },
+  "session1": {
+    "rc": 0,
+    "lines": [
+      "Stored \u2014 \"Launch date is Nov 11.\" is in NEURAL_MESH as a semantic memory (id 21c7d1a1f35a)."
+    ]
+  },
+  "session2": {
+    "rc": 0,
+    "lines": [
+      "Our launch date is Nov 11."
+    ]
+  },
+  "beats": {
+    "now": "- [8f5bdea0] the retry limit for service-3 is 11 attempts",
+    "then": "As of 2026-03-01:\n- [55b99f24] the retry limit for service-3 is 3 attempts",
+    "stats": "NEURAL_MESH (neural-mesh): {'total': 1, 'by_type': {'semantic': 1}, 'hot': 1, 'cold': 0, 'quarantined': 0, 'resonance_backend': 'python'} | store: /opt/data/cache/scratch/nm-demo-store-llkuvg2e/neural-mesh/mesh.db",
+    "old_id": "55b99f242eab"
+  }
+}

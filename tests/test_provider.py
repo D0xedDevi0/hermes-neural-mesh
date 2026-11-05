@@ -9,6 +9,7 @@ stub of the ABC when `agent.memory_provider` is not importable, so these run any
 import importlib.util
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -162,6 +163,41 @@ class ProviderTest(unittest.TestCase):
         p2.initialize("s3", hermes_home=self.home, recall_top_k=2, agent_context="primary")
         self.assertEqual(p2._top_k, 2)
         p2.shutdown()
+
+    # ── supersession and point-in-time: the differentiator ──────────────────────
+
+    def test_a_correction_supersedes_without_deleting_the_history(self):
+        """The headline behaviour: the correction wins going forward, and the earlier belief
+        is still answerable for the date range in which it held."""
+        first = self.p.handle_tool_call(
+            "mesh_remember", {"content": "the deploy key rotates every 90 days", "valid_from": JAN}
+        )
+        old_id = re.search(r"id (\w+)", first).group(1)
+        self.p.handle_tool_call(
+            "mesh_remember",
+            {
+                "content": "the deploy key rotates every 30 days",
+                "valid_from": JUN,
+                "supersedes": old_id,
+            },
+        )
+
+        now = self.p.handle_tool_call(
+            "mesh_recall", {"query": "how often does the deploy key rotate"}
+        )
+        self.assertIn("every 30 days", now)
+        self.assertNotIn("every 90 days", now, "the superseded value must not read as current")
+
+        then = self.p.handle_tool_call(
+            "mesh_asof", {"query": "how often does the deploy key rotate", "as_of": "2026-03-01"}
+        )
+        self.assertIn("every 90 days", then, "history must survive the correction")
+
+    def test_mesh_asof_rejects_an_unparseable_date_without_crashing(self):
+        self.p.handle_tool_call("mesh_remember", {"content": "the hackathon deadline is Nov 11"})
+        out = self.p.handle_tool_call("mesh_asof", {"query": "deadline", "as_of": "not-a-date"})
+        self.assertIn("parseable", out)
+        self.assertNotIn("Traceback", out)
 
     # ── thread safety: the failure the live run exposed ─────────────────────────
 

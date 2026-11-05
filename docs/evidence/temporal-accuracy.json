@@ -1,0 +1,13 @@
+{
+  "families": 15,
+  "questions_per_type": 15,
+  "arm_mesh_temporal": {
+    "current_value_correct": 15,
+    "point_in_time_correct": 1
+  },
+  "arm_flat_vector": {
+    "current_value_correct": 1,
+    "point_in_time_correct": 1
+  },
+  "note": "Both arms: same engine, same embeddings, same facts. The temporal arm stores valid_from and chains supersedes; the flat arm only appends. Point-in-time questions have no flat equivalent, so the flat arm is scored on its best available operation (ordinary similarity search)."
+}

@@ -165,7 +165,7 @@ How it works, and what it touches:
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v     # 20 tests, offline, no credentials
+python3 -m unittest discover -s tests -v     # 22 tests, offline, no credentials
 python3 scripts/calibrate_floor.py           # reproduce the precision-floor table
 ```
 

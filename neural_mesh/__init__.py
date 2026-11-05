@@ -62,12 +62,32 @@ from .curriculum import learn_plan, record_attempt, gaps_remaining
 # so `pip install neural-mesh` works without eth-account / yantrikdb.
 _LAZY = {}
 
+# NOTE (vendoring): these six names sit in __all__ upstream with no loader behind them, so
+# `from neural_mesh import *` raised AttributeError on each one. They import cleanly from
+# .x402_recall, so the vendored copy exposes them lazily rather than leaving __all__ untrue.
+_X402_NAMES = {
+    "TIERS", "SERVICE_NAME", "RECEIPT_CONTRACT", "FEE_RECIPIENT", "BASE_RPC",
+    "verify_receipt_onchain",
+}
+
 def __getattr__(name):
     if name == "PaidRecallGate":
         if "PaidRecallGate" not in _LAZY:
             from .x402_recall import PaidRecallGate as _PRG
             _LAZY["PaidRecallGate"] = _PRG
         return _LAZY["PaidRecallGate"]
+    if name in _X402_NAMES:
+        if name not in _LAZY:
+            from .x402_recall import (
+                TIERS, SERVICE_NAME, RECEIPT_CONTRACT,
+                FEE_RECIPIENT, BASE_RPC, verify_receipt_onchain,
+            )
+            _LAZY.update({
+                "TIERS": TIERS, "SERVICE_NAME": SERVICE_NAME,
+                "RECEIPT_CONTRACT": RECEIPT_CONTRACT, "FEE_RECIPIENT": FEE_RECIPIENT,
+                "BASE_RPC": BASE_RPC, "verify_receipt_onchain": verify_receipt_onchain,
+            })
+        return _LAZY[name]
     raise AttributeError(f"module 'neural_mesh' has no attribute {name!r}")
 
 __all__ = ["Mesh", "MemoryType", "export_mesh", "import_mesh",

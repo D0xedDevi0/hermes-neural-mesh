@@ -57,6 +57,12 @@ Nothing on the store/recall path touches it. `Mesh`, `add`, `recall`, `recall_as
 temporal helpers, resonance and BM25 all import and run without it, which the test suite
 exercises on every run.
 
+Two references to the bridge survive inside `x402_recall.py`, both wrapped in
+`try/except Exception: pass` — they degrade to no-op, so they are left as upstream wrote them.
+Separately, upstream's `__all__` lists six `x402_recall` names that had no loader behind them,
+so `from neural_mesh import *` raised `AttributeError` on each; the vendored copy gives them
+lazy branches, as noted in the code.
+
 ## Keeping it current
 
 Upstream moves. To refresh the vendored copy:

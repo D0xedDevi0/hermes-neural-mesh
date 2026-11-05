@@ -123,6 +123,35 @@ Absolute `0.25` sits inside the measured band where every relevant probe still h
 unrelated ones return nothing, so automatic injection uses `0.25` and an explicit
 `mesh_recall` uses `0.05`.
 
+### What temporal structure buys
+
+The ablation below runs through the shipped tools — `mesh_remember`, `mesh_recall`,
+`mesh_asof` — over the same 15 fact families in both arms. A family is one attribute whose
+value changes twice across 2025–2026, so the answer *now* differs from the answer *in August
+2025*. The temporal arm stores `valid_from` and chains `supersedes`; the flat arm only
+appends, which is what a flat vector memory does. Same engine, same embeddings, same facts, so
+the difference is attributable to the temporal model.
+
+| question | mesh (temporal) | flat vector |
+| --- | --- | --- |
+| which value is current? | **15/15** | 1/15 |
+| which value was current on 2025-08-01? | **15/15** | 1/15 |
+
+`scripts/evidence_temporal.py` reproduces this and writes `docs/evidence/temporal-accuracy.json`.
+
+The first row is the one worth sitting with: a flat store asked *"which value is current?"*
+answered correctly **once in fifteen**. All three values of a family are near-identical
+sentences, so similarity has nothing to separate them with. The second row is not a fair fight
+at all — a flat store has no point-in-time operation — and it is scored on its best available
+move, ordinary similarity search.
+
+Writing this section found a real bug. The core closes a superseded fact at *the moment of
+supersession*: correct when a correction arrives in real time, wrong when history is
+backfilled, because every past value then stays valid at every past date and a dated snapshot
+returns all of them ranked by similarity. That measured **1/15**. Handing the successor's
+`valid_from` to the predecessor's `valid_to` is what moved it to 15/15, and
+`test_a_correction_supersedes_without_deleting_the_history` locks it so it cannot regress.
+
 ### Threading
 
 Hermes calls a provider from several threads: `initialize()` on the startup thread, tool

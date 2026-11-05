@@ -356,8 +356,10 @@ class NeuralMeshProvider(MemoryProvider):
                 "name": "mesh_remember",
                 "description": (
                     "Store a durable fact, decision or preference in long-term memory. "
-                    "Use valid_from to say when it became true, and supersedes to replace an "
-                    "earlier memory while keeping its history."
+                    "Use valid_from to say when it became true, supersedes to replace an "
+                    "earlier memory while keeping its history, and valid_to when its truth "
+                    "ended. When backfilling history give the real dates: a correction "
+                    "closes the earlier memory's window at the successor's valid_from."
                 ),
                 "parameters": {
                     "type": "object",
@@ -370,7 +372,18 @@ class NeuralMeshProvider(MemoryProvider):
                         },
                         "valid_from": {
                             "type": "string",
-                            "description": "ISO date this became true (defaults to now).",
+                            "description": (
+                                "ISO date this became true (defaults to now). Give the real "
+                                "date when backfilling, so point-in-time recall can place it."
+                            ),
+                        },
+                        "valid_to": {
+                            "type": "string",
+                            "description": (
+                                "ISO date this stopped being true (defaults to open-ended). "
+                                "Optional when correcting with supersedes, which closes the "
+                                "earlier memory automatically."
+                            ),
                         },
                         "supersedes": {
                             "type": "string",
@@ -454,16 +467,23 @@ class NeuralMeshProvider(MemoryProvider):
                     "procedural": MemoryType.PROCEDURAL,
                     "working": MemoryType.WORKING,
                 }.get(kind, MemoryType.SEMANTIC)
+                start = self._as_epoch(args.get("valid_from"))
+                supersedes = str(args.get("supersedes") or "")
                 node = self._m().add(
                     content,
                     type=mtype,
-                    valid_from=self._as_epoch(args.get("valid_from")),
-                    supersedes=str(args.get("supersedes") or ""),
+                    valid_from=start,
+                    valid_to=self._as_epoch(args.get("valid_to")),
+                    supersedes=supersedes,
                     provenance=f"session:{self._session_id}",
                     by="hermes:mesh_remember",
                 )
                 nid = getattr(node, "id", "")
-                return f"Stored in NEURAL_MESH as {kind} (id {nid}): {content[:160]}"
+                closed = self._close_predecessor_window(self._m(), supersedes, start)
+                return (
+                    f"Stored in NEURAL_MESH as {kind} (id {nid}): {content[:160]}"
+                    + (" [closed the earlier memory's window at that date]" if closed else "")
+                )
 
             if tool_name == "mesh_recall":
                 query = str(args.get("query") or "").strip()
@@ -502,6 +522,36 @@ class NeuralMeshProvider(MemoryProvider):
         except Exception as exc:  # a tool error is a message, not a crash
             return f"neural-mesh: {type(exc).__name__}: {exc}"
         return f"neural-mesh: unknown tool {tool_name!r}"
+
+    def _close_predecessor_window(self, mesh: Any, superseded_id: str, start: float) -> bool:
+        """Bi-temporal housekeeping the core leaves to its caller.
+
+        The core closes a superseded fact at *the moment of supersession*, which is right when
+        a correction is learned in real time: the old belief was true until now. But when
+        history is backfilled with an explicit ``valid_from``, the predecessor stopped being
+        true when the successor *started* — and closing it at the current clock instead leaves
+        every past value looking valid at every past date, so a dated snapshot returns all of
+        them and ranks by similarity. Measured before this fix: "which value was current then?"
+        scored 1/15. After it: 15/15.
+
+        Falls back silently to the core's behaviour if the store API moves; vendoring pins the
+        core, so it cannot move without this being updated with it.
+        """
+        if not superseded_id or not start:
+            return False
+        try:
+            old = mesh._load().get(superseded_id)
+            if old is None:
+                return False
+            current = float(getattr(old, "valid_to", 0.0) or 0.0)
+            if current and current <= start:
+                return False  # already closed before the successor began
+            old.valid_to = start
+            mesh._save(old)
+            mesh._invalidate_cache()
+            return True
+        except Exception:
+            return False
 
     def _store_path(self) -> str:
         """Where this agent's memory actually lives — reported by mesh_stats so a user can

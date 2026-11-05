@@ -193,6 +193,14 @@ class ProviderTest(unittest.TestCase):
         )
         self.assertIn("every 90 days", then, "history must survive the correction")
 
+        # and after the correction took effect, the dated view holds only the new value:
+        # before the window-closing fix this returned every value that had ever held.
+        after = self.p.handle_tool_call(
+            "mesh_asof", {"query": "how often does the deploy key rotate", "as_of": "2026-07-01"}
+        )
+        self.assertIn("every 30 days", after)
+        self.assertNotIn("every 90 days", after, "the closed window must not leak into a later view")
+
     def test_mesh_asof_rejects_an_unparseable_date_without_crashing(self):
         self.p.handle_tool_call("mesh_remember", {"content": "the hackathon deadline is Nov 11"})
         out = self.p.handle_tool_call("mesh_asof", {"query": "deadline", "as_of": "not-a-date"})

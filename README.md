@@ -32,6 +32,11 @@ An 85-second walkthrough, rendered offline from real captured output —
    different;
 3. the measured ablation — 15/15 against a flat store's 1/15.
 
+Re-checked live on **2026-11-07** with the control the demo does not include: same profile and
+binary, session history deleted, store present → the fact comes back; **store removed → "I have no
+vault code stored in memory"**. Commands and raw output:
+[`docs/evidence/live-recheck-2026-11-07.txt`](docs/evidence/live-recheck-2026-11-07.txt).
+
 Nothing in it is a screen recording: the frames are rendered from captured command output and
 every line traces back to the ledger. `scripts/demo_build.py capture` re-runs the real
 commands; `render` rebuilds the cut.

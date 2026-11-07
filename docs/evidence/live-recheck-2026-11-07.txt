@@ -1,0 +1,58 @@
+LIVE RE-CHECK - 2026-11-07, against the tree at commit 876ffd0
+Purpose: prove the store is load-bearing (not decoration) in a real Hermes runtime,
+including the control the earlier demo ledger did not have - same binary, same profile,
+store removed -> the answer disappears.
+
+Isolation note: a fresh throwaway profile was used (`hermes profile create nmprobe`), never the
+author's live profile, and the `HOME=` footgun was avoided by using `-p` for every call.
+
+Setup (once):
+    $ cp -r hermes-neural-mesh /opt/data/profiles/nmprobe/plugins/neural-mesh
+    $ cat /opt/data/profiles/nmprobe/config.yaml
+    memory:
+      provider: neural-mesh
+    $ hermes -p nmprobe memory status
+    Provider:  neural-mesh
+    Plugin:    installed ✓
+    Status:    available ✓
+
+Process 1 - store a fact through a real agent session:
+    $ rm -rf /opt/data/profiles/nmprobe/neural-mesh /opt/data/profiles/nmprobe/sessions
+    $ hermes -p nmprobe -z "Call the mesh_remember tool once, with content exactly: 'the vault code is 4471 and the launch date is Nov 11'. Then reply in one short line that you stored it." --yolo
+    [exit 0]
+    Stored: "the vault code is 4471 and the launch date is Nov 11" (id a1a4e1854bab).
+
+Store, read directly from the file (no plugin, no Hermes):
+    $ python3 -c "from neural_mesh import Mesh; m=Mesh('.../nmprobe/neural-mesh/mesh.db'); print(m.stats()); ..."
+    stats: {'total': 2, 'by_type': {'semantic': 1, 'episodic': 1}, 'hot': 2, 'cold': 0,
+            'quarantined': 0, 'resonance_backend': 'python'}
+     - the vault code is 4471 and the launch date is Nov 11
+     - User said: Call the mesh_remember tool once, with content exactly: 'the vault code is 4471
+
+Process 2 - COLD: session history deleted first, so the answer cannot come from history:
+    $ rm -rf /opt/data/profiles/nmprobe/sessions      # 0 files left
+    $ hermes -p nmprobe -z "What is the vault code? Answer from memory only, one short sentence, no tool calls." --yolo
+    My recalled memory contains a note stating the vault code is 4471 - though that note records a
+    past instruction to store it, not a verified fact.
+
+Control - IDENTICAL run, same binary, same profile, session history deleted again, ONLY the store removed:
+    $ mv .../nmprobe/neural-mesh/mesh.db .../mesh.db.bak
+    $ rm -rf /opt/data/profiles/nmprobe/sessions
+    $ hermes -p nmprobe -z "What is the vault code? Answer from memory only, one short sentence." --yolo
+    I have no vault code stored in memory.
+    $ mv .../mesh.db.bak .../mesh.db                 # store restored, 24576 bytes
+
+What this shows, and what it does not:
+- The recalled value is load-bearing: with the store present the agent answers 4471 in a fresh,
+  history-less process; with the same setup and the store removed it reports no memory at all.
+  Nothing else in the run changed, so the store is the only thing that carried the fact.
+- Both answers are single-sentence and reproduce the shipped README claim, including its limit:
+  the agent distinguishes "a note recording a past instruction" from a verified fact.
+- This is one fact, one date, one machine: a demonstration, not a benchmark. The quantitative
+  claim stays the 15-family ablation in demo_proof.json.
+
+Reproduce (no install, no keys, ~30s of model time):
+    hermes profile create nmprobe
+    cp -r <repo> /opt/data/profiles/nmprobe/plugins/neural-mesh
+    printf 'memory:\n  provider: neural-mesh\n' >> /opt/data/profiles/nmprobe/config.yaml
+    # then the four commands above

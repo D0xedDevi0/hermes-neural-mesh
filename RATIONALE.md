@@ -62,6 +62,13 @@ the provider from startup, executor and daemon-worker threads), supersession, po
 recall, and an unmatched `supersedes` ID, which warns rather than silently appending a
 contradiction.
 
+**Live re-check, with a deletion control** — 2026-11-07, throwaway profile, real agent
+sessions (`docs/evidence/live-recheck-2026-11-07.txt`): a session stored a fact, then a
+fresh process with its session history deleted answered it from the store; an identical run
+with **only the store removed** answered "I have no vault code stored in memory." Same
+binary, same profile, one variable changed — so the store is what carried the fact, not
+history or context. The demo ledger below has no such control; this is the addition.
+
 ## Disclosures
 
 - **Storage is local SQLite and unencrypted.** Do not put credentials or secrets in it.

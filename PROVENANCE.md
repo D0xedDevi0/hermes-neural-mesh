@@ -6,10 +6,10 @@ plugin is dependency-free and reviewable line by line.
 | | |
 | --- | --- |
 | Upstream | https://github.com/D0xedDevi0/NEURAL_MESH |
-| Upstream commit | `fd7b35c7b5b9a61a8c7f4fbcebfdda25070a1d6e` (2026-10-15) |
-| Upstream version | `neural-mesh` 0.39.0 |
+| Upstream commit | `d2a4da6da95b76028e5dcf6547d173e0a8216e57` (2026-11-15) |
+| Upstream version | `neural-mesh` 0.40.0 |
 | License | MIT (see `LICENSE`) |
-| Vendored | `neural_mesh/` — 50 Python files, ~540 KB |
+| Vendored | `neural_mesh/` — 47 Python files, 536K |
 | Not vendored | `rust_mesh.so` (compiled acceleration), `neural_mesh/integrations/` (loads a credential file), `data/`, `bench/`, `server.py`, the HTTP service, tests and docs of the upstream project |
 
 ## Why it is vendored rather than declared as a dependency
@@ -62,6 +62,20 @@ Two references to the bridge survive inside `x402_recall.py`, both wrapped in
 Separately, upstream's `__all__` lists six `x402_recall` names that had no loader behind them,
 so `from neural_mesh import *` raised `AttributeError` on each; the vendored copy gives them
 lazy branches, as noted in the code.
+
+## The provenance ledger is part of this surface
+
+`neural_mesh/ledger.py` (v0.40.0) is vendored with the rest, and it is the reason
+`mesh_verify` / `mesh_provenance` exist. It is pure stdlib, writes only to the same sqlite
+file the store already uses, and opens no network connection — its Base (8453) anchor support
+*produces* calldata, it never broadcasts. The ledger reads no credential file, so nothing here
+contradicts the `integrations/` exclusion above.
+
+One consequence worth knowing before an upgrade: an existing store has no ledger, so the first
+`mesh_verify` reports unwitnessed memories (invariant I3, `coverage`) rather than OK. That is
+correct — the log genuinely has no record of them — and adoption is explicit (`adopt: true`),
+never silent. Adoption attests those memories **as of the moment it runs**; it does not and
+cannot prove they were never altered before it.
 
 ## Keeping it current
 

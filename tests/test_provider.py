@@ -53,7 +53,57 @@ class ProviderTest(unittest.TestCase):
 
     def test_tools_are_declared_and_callable(self):
         names = {t["name"] for t in self.p.get_tool_schemas()}
-        self.assertEqual(names, {"mesh_remember", "mesh_recall", "mesh_asof", "mesh_stats"})
+        self.assertEqual(names, {"mesh_remember", "mesh_recall", "mesh_asof", "mesh_stats",
+                                 "mesh_verify", "mesh_provenance"})
+        # declared means callable: no tool may be advertised with no handler behind it
+        for name in names:
+            self.assertTrue(callable(self.p.handle_tool_call), name)
+
+    # ── provenance ledger (v0.40.0) ─────────────────────────────────────────────
+
+    def test_verify_reports_ok_on_an_untouched_store(self):
+        self.p.handle_tool_call("mesh_remember", {"content": "the deploy key rotates every 90 days"})
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("integrity: OK", out, out)
+
+    def test_verify_detects_a_memory_edited_behind_the_api(self):
+        """The whole point of the lane: the host (or anything else with file access) can
+        rewrite a stored fact, and the agent must be able to tell."""
+        import sqlite3
+        self.p.handle_tool_call("mesh_remember", {"content": "the treasury threshold is 2 of 3"})
+        node_id = sorted(self.p._m()._load())[0]
+        conn = sqlite3.connect(str(self.p._store_file))
+        conn.execute("UPDATE nodes SET content='the treasury threshold is 1 of 3' WHERE id=?",
+                     (node_id,))
+        conn.commit()
+        conn.close()
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("FAILED", out, out)
+        self.assertIn("content", out, out)
+
+    def test_verify_detects_a_deleted_memory(self):
+        import sqlite3
+        self.p.handle_tool_call("mesh_remember", {"content": "an inconvenient fact"})
+        node_id = sorted(self.p._m()._load())[0]
+        conn = sqlite3.connect(str(self.p._store_file))
+        conn.execute("DELETE FROM nodes WHERE id=?", (node_id,))
+        conn.commit()
+        conn.close()
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("FAILED", out, out)
+        self.assertIn("orphan", out, out)
+
+    def test_provenance_resolves_the_prefix_recall_shows(self):
+        self.p.handle_tool_call("mesh_remember", {"content": "the bridge contract is 0xA11CE"})
+        node_id = sorted(self.p._m()._load())[0]
+        out = self.p.handle_tool_call("mesh_provenance", {"node_id": node_id[:8]})
+        self.assertIn("asserted by", out, out)
+        self.assertIn(node_id[:8], out)
+
+    def test_provenance_says_so_rather_than_guessing_on_a_bad_id(self):
+        self.p.handle_tool_call("mesh_remember", {"content": "the incident channel is #ops"})
+        out = self.p.handle_tool_call("mesh_provenance", {"node_id": "zzzzzzzz"})
+        self.assertIn("no memory matching", out, out)
 
     # ── memory round-trip ───────────────────────────────────────────────────────
 

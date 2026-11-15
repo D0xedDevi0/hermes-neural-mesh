@@ -84,7 +84,7 @@ hermes config set memory.provider yantrikdb   # or whichever provider you used b
 
 ## Tools
 
-Four tools are registered with the agent:
+Six tools are registered with the agent:
 
 | Tool | What it does |
 | --- | --- |
@@ -92,6 +92,23 @@ Four tools are registered with the agent:
 | `mesh_recall` | Search memory for what is relevant to a query |
 | `mesh_asof` | Point-in-time recall: what was true on a given date |
 | `mesh_stats` | Size, lanes, retrieval backend, and **the path of the store it is using** |
+| `mesh_verify` | Check memory has not been altered behind the agent's back — an append-only hash-chained ledger of every memory event, verified against the live store. Reports *which* invariant broke and what it means, not just true/false |
+| `mesh_provenance` | Chain of custody for one memory: who asserted it, when, and every event since (corrections, supersessions, quarantine) |
+
+### What `mesh_verify` actually proves
+
+Every write that changes what a memory *claims about itself* — its content, who asserted it,
+when it became true, whether it was superseded — is appended to a hash-chained ledger, so each
+entry commits to the one before it. `mesh_verify` then checks five things: the chain is intact,
+every live memory is witnessed, no stored memory has been rewritten since it was witnessed,
+any anchored prefix still matches, and no witness outlives a memory that was deleted.
+
+That is an **integrity** guarantee, not a truth guarantee: a lie is signed as faithfully as a
+fact. What it catches is the case a memory system otherwise cannot see — a stored `2 of 3`
+becoming `1 of 3`, an assertion by another agent relabelled as the user's, or a fact deleted to
+hide what it said. `mesh_verify` on a store that predates the ledger reports unwitnessed
+memories and says so; adopting them (`adopt: true`) attests them **from now on** and is never
+done silently.
 
 ## Configuration
 

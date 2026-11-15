@@ -427,6 +427,48 @@ class NeuralMeshProvider(MemoryProvider):
                 "description": "Report the size, lanes and backend of the local memory mesh.",
                 "parameters": {"type": "object", "properties": {}},
             },
+            {
+                "name": "mesh_verify",
+                "description": (
+                    "Check that long-term memory has not been altered behind the agent's back. "
+                    "Verifies an append-only hash-chained ledger of memory events: chain integrity, "
+                    "every live memory witnessed, content still matching its witness, anchored "
+                    "prefix intact, no witness outliving its memory. Use when asked whether memory "
+                    "is trustworthy/tampered, after a suspected injection or restore, or as a "
+                    "periodic self-check. Reports the first failure and what it means, not just "
+                    "true/false."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "adopt": {
+                            "type": "boolean",
+                            "description": (
+                                "Attest memories that predate the ledger as-of-now. Only use when "
+                                "verify reports unwitnessed memories and the operator accepts that "
+                                "adoption proves they are intact from now on — it does NOT prove "
+                                "they were never altered before."
+                            ),
+                        },
+                    },
+                },
+            },
+            {
+                "name": "mesh_provenance",
+                "description": (
+                    "Chain of custody for one memory: who asserted it (which agent/source), when, "
+                    "and every event since — corrections, supersessions, quarantine. Use when a "
+                    "recalled fact's origin or history is being questioned, or to tell an "
+                    "assertion by another agent from one the user made."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string", "description": "Memory id (the 8-char prefix shown in recall results is enough)."},
+                    },
+                    "required": ["node_id"],
+                },
+            },
         ]
 
     @staticmethod
@@ -525,6 +567,82 @@ class NeuralMeshProvider(MemoryProvider):
             if tool_name == "mesh_stats":
                 stats = self._m().stats()
                 return f"NEURAL_MESH ({PROVIDER_NAME}): {stats} | store: {self._store_path()}"
+
+            if tool_name == "mesh_verify":
+                mesh = self._m()
+                if getattr(mesh, "ledger", None) is None:
+                    return ("neural-mesh: this store was opened without the provenance ledger, "
+                            "so nothing has been witnessed and there is nothing to verify.")
+                if args.get("adopt"):
+                    adopted = mesh.adopt_ledger()
+                    head = f" (adopted {adopted.get('adopted', 0)} pre-ledger memories as-of-now)"
+                else:
+                    head = ""
+                rep = mesh.verify_memory()
+                if rep.ok:
+                    return (f"NEURAL_MESH memory integrity: OK — {rep.summary()}{head}. "
+                            f"The ledger is intact and every live memory matches what was "
+                            f"witnessed for it.")
+                # A failure is the interesting case: say which invariant broke and what it means.
+                meaning = {
+                    "chain": "the event log itself was edited, reordered or truncated",
+                    "content": "a stored memory no longer matches what was written "
+                               "(it was changed in place, outside the API)",
+                    "coverage": "memories exist that this log never witnessed "
+                                "(written behind the API, or predating the ledger)",
+                    "anchor": "history was rewritten or cut after the head was anchored",
+                    "orphan": "a memory was deleted but its witness remains",
+                }.get(rep.kind, "an integrity invariant failed")
+                extra = ""
+                if rep.kind == "coverage" and rep.advice:
+                    extra = (f" If these are pre-ledger memories and the operator accepts that "
+                             f"adoption only attests them from now on, call mesh_verify with "
+                             f"adopt=true: {rep.advice}")
+                return (f"NEURAL_MESH memory integrity: FAILED ({rep.kind}) — {meaning}. "
+                        f"{rep.reason} [entry #{rep.broken_at}]"
+                        + (f" node {rep.node_id[:8]}" if rep.node_id else "") + f".{extra}")
+
+            if tool_name == "mesh_provenance":
+                node_id = str(args.get("node_id") or "").strip()
+                if not node_id:
+                    return "neural-mesh: mesh_provenance needs a node_id."
+                mesh = self._m()
+                if getattr(mesh, "ledger", None) is None:
+                    return "neural-mesh: the provenance ledger is disabled for this store."
+                # Recall shows 8-char ids, and the tool says that prefix is enough — so
+                # resolve it here. The ledger itself only answers exact ids.
+                if getattr(mesh, "_load", None) is not None:
+                    try:
+                        known = list(mesh._load().keys())
+                    except Exception:
+                        known = []
+                    if node_id not in known:
+                        matches = [k for k in known if k.startswith(node_id)]
+                        if not matches:
+                            return (f"neural-mesh: no memory matching id {node_id!r} — check the "
+                                    f"id from a recall result.")
+                        if len(matches) > 1:
+                            return (f"neural-mesh: {node_id!r} matches {len(matches)} memories "
+                                    f"({', '.join(m[:8] for m in matches[:6])}) — give more "
+                                    f"characters.")
+                        node_id = matches[0]
+                p = mesh.provenance_of(node_id)
+                if not p.get("witnessed") and not p.get("events"):
+                    return (f"neural-mesh: no ledger entry for {node_id[:8]} — either the id is "
+                            f"wrong or this memory predates the ledger (adopt it via mesh_verify).")
+                import datetime as _dt
+                when = p.get("first_seen") or 0.0
+                stamp = (_dt.datetime.fromtimestamp(when, _dt.timezone.utc)
+                         .strftime("%Y-%m-%d %H:%MZ") if when else "unknown")
+                lines = [f"{node_id[:8]} — asserted by "
+                         f"{', '.join(p.get('authors') or ['unknown'])}, first witnessed {stamp} "
+                         f"(latest op: {p.get('latest_op') or '?'})"]
+                for e in p.get("events", []):
+                    lines.append(f"  #{e.get('seq')} {e.get('op')} by {e.get('agent_id') or '-'}"
+                                 f"{(chr(32) + e['source']) if e.get('source') else ''}")
+                lines.append("  the record is witnessed; run mesh_verify to confirm the stored "
+                             "content still matches it")
+                return "\n".join(lines)
 
         except Exception as exc:  # a tool error is a message, not a crash
             return f"neural-mesh: {type(exc).__name__}: {exc}"

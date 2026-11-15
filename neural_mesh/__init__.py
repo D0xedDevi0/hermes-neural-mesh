@@ -27,6 +27,9 @@ from .budget import select_fit, token_estimate, default_value_score, fit_summary
 from .reader import Reader, ExtractiveReader, CallableReader
 from .lifecycle import MemoryLifecycle
 from .pointer import PointerStore, store_big_output
+from .ledger import (ProvenanceLedger, LedgerEntry, VerifyReport, SCHEME,
+                     ANCHOR_SCHEME, BASE_CHAIN_ID, ATTEST_OPS,
+                     content_digest, attested_digest, merkle_root)
 # NOTE (vendoring): upstream also exports a Helixa provenance/stamp API from
 # .integrations.helixa_provenance at this point. That subpackage is deliberately NOT vendored
 # — its signer loads a private key out of a credential file, which a plugin installed into a
@@ -116,4 +119,4 @@ __all__ = ["Mesh", "MemoryType", "export_mesh", "import_mesh",
            "export_artifact", "verify_artifact", "import_artifact",
            "serialize", "deserialize",
            "learn_plan", "record_attempt", "gaps_remaining"]
-__version__ = "0.39.0"
+__version__ = "0.40.0"

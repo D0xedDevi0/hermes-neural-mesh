@@ -6,7 +6,7 @@ plugin is dependency-free and reviewable line by line.
 | | |
 | --- | --- |
 | Upstream | https://github.com/D0xedDevi0/NEURAL_MESH |
-| Upstream commit | `b4a9d9b01932d317e948eb362a1f0833290ecdae` (v0.40.0, 2026-11-15) plus the v0.41.0 working tree: `anchor_file` sink, per-field attestation digests, numeric coercion in `_field` |
+| Upstream commit | `f3ed1de6` (v0.41.0) — `anchor_file` sink, per-field attestation digests, numeric coercion in `_field`; builds on `b4a9d9b0` (v0.40.0) |
 | Upstream version | `neural-mesh` 0.41.0 |
 | License | MIT (see `LICENSE`) |
 | Vendored | `neural_mesh/` — 47 Python files, 536K |

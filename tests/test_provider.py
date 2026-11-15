@@ -324,6 +324,17 @@ class ProviderTest(unittest.TestCase):
         self.assertIsInstance(seen["p"], nm.NeuralMeshProvider)
         self.assertEqual(seen["p"].name, "neural-mesh")
 
+    def test_vendored_version_matches_the_plugin_manifest(self):
+        """The vendored package reported 0.40.0 while plugin.yaml said 0.41.0 for a whole
+        release, because nothing compared the two. A stale version string is how an
+        operator ends up unable to say which build a failure came from."""
+        manifest = (REPO / "plugin.yaml").read_text(encoding="utf-8")
+        declared = re.search(r"^version:\s*(\S+)\s*$", manifest, re.M).group(1)
+        if str(REPO) not in sys.path:
+            sys.path.insert(0, str(REPO))
+        import neural_mesh as vendored  # the package as an operator would import it
+        self.assertEqual(vendored.__version__, declared)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

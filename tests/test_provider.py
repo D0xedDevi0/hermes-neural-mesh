@@ -130,11 +130,14 @@ class ProviderTest(unittest.TestCase):
         self.p.handle_tool_call("mesh_remember", {"content": "the deploy key rotates every 90 days"})
         self.assertIn("90 days", self.p.prefetch("how often does the deploy key rotate?"))
 
-    def test_stats_report_the_pure_python_backend(self):
+    def test_stats_report_the_resonance_backend(self):
         self.p.handle_tool_call("mesh_remember", {"content": "a fact that exists"})
         out = self.p.handle_tool_call("mesh_stats", {})
         self.assertIn("resonance_backend", out)
-        self.assertIn("python", out)  # no rust module shipped; fallback is the working path
+        # the plugin ships pure Python, but a host that already has the rust
+        # accelerator installed will use it — either way the backend is named, and
+        # stats must not be the place the plugin breaks on a machine it did not build
+        self.assertTrue(any(b in out for b in ("python", "rust")), out)
 
     # ── the differentiator: point-in-time recall ────────────────────────────────
 

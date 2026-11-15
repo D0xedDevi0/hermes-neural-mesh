@@ -105,7 +105,11 @@ class NeuralMeshProvider(MemoryProvider):
         mesh = self._meshes.get(ident)
         if mesh is None:
             try:
-                mesh = Mesh(str(self._store_file))
+                # NEURAL_MESH_ANCHORS points at a file outside this store where anchors
+                # are pinned. Without it, anchors live in the database they protect,
+                # which an attacker with write access simply deletes.
+                mesh = Mesh(str(self._store_file),
+                            anchor_file=os.environ.get("NEURAL_MESH_ANCHORS", ""))
             except Exception:
                 return None
             if len(self._meshes) >= MAX_THREAD_HANDLES:
@@ -450,6 +454,16 @@ class NeuralMeshProvider(MemoryProvider):
                                 "they were never altered before."
                             ),
                         },
+                        "anchors": {
+                            "type": "string",
+                            "description": (
+                                "Path to an anchor sink file kept outside the store. Anchors "
+                                "recorded there are checked as well; an anchor inside the database "
+                                "is deleted along with the entries it protects, so this is the "
+                                "only way a truncated log is caught. Pass the same path the mesh "
+                                "was configured with."
+                            ),
+                        },
                     },
                 },
             },
@@ -578,6 +592,9 @@ class NeuralMeshProvider(MemoryProvider):
                     head = f" (adopted {adopted.get('adopted', 0)} pre-ledger memories as-of-now)"
                 else:
                     head = ""
+                if args.get("anchors"):
+                    # Judge against an anchor the store's own owner cannot rewrite.
+                    mesh.ledger.anchor_file = os.path.abspath(args["anchors"])
                 rep = mesh.verify_memory()
                 if rep.ok:
                     return (f"NEURAL_MESH memory integrity: OK — {rep.summary()}{head}. "
@@ -586,14 +603,21 @@ class NeuralMeshProvider(MemoryProvider):
                 # A failure is the interesting case: say which invariant broke and what it means.
                 meaning = {
                     "chain": "the event log itself was edited, reordered or truncated",
-                    "content": "a stored memory no longer matches what was written "
-                               "(it was changed in place, outside the API)",
+                    "content": "the text of a stored memory no longer matches what was "
+                               "written (it was changed in place, outside the API)",
+                    "attribution": "a stored memory is now credited to someone other than "
+                                   "the agent that asserted it (authorship was laundered)",
+                    "validity": "a stored memory's validity window or supersession was "
+                                "rewritten — what the log says is live, or already "
+                                "corrected, no longer matches the row",
                     "coverage": "memories exist that this log never witnessed "
                                 "(written behind the API, or predating the ledger)",
                     "anchor": "history was rewritten or cut after the head was anchored",
                     "orphan": "a memory was deleted but its witness remains",
                 }.get(rep.kind, "an integrity invariant failed")
                 extra = ""
+                if rep.kind in ("attribution", "validity") and getattr(rep, "fields", None):
+                    extra += (f" Fields that diverged: {', '.join(rep.fields)}.")
                 if rep.kind == "coverage" and rep.advice:
                     extra = (f" If these are pre-ledger memories and the operator accepts that "
                              f"adoption only attests them from now on, call mesh_verify with "

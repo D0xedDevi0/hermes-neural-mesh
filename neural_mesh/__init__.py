@@ -28,8 +28,11 @@ from .reader import Reader, ExtractiveReader, CallableReader
 from .lifecycle import MemoryLifecycle
 from .pointer import PointerStore, store_big_output
 from .ledger import (ProvenanceLedger, LedgerEntry, VerifyReport, SCHEME,
-                     ANCHOR_SCHEME, BASE_CHAIN_ID, ATTEST_OPS,
-                     content_digest, attested_digest, merkle_root)
+                     ANCHOR_SCHEME, BASE_CHAIN_ID, ATTEST_OPS, FORGET_OP,
+                     CONTENT_FIELDS, ATTRIBUTION_FIELDS, VALIDITY_FIELDS,
+                     content_digest, attested_digest, merkle_root,
+                     field_digests, classify_fields,
+                     read_anchors, append_anchor)
 # NOTE (vendoring): upstream also exports a Helixa provenance/stamp API from
 # .integrations.helixa_provenance at this point. That subpackage is deliberately NOT vendored
 # — its signer loads a private key out of a credential file, which a plugin installed into a

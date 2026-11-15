@@ -89,3 +89,67 @@ assert "OK" in adopted, adopted
 
 print("\nSMOKE OK — plugin surface works, tampering is reported, adoption is explicit.")
 print(json.dumps({"tools": tools, "store": store}, indent=2))
+
+
+# ── v0.41.0 ──────────────────────────────────────────────────────────────────
+print("\n-- tamper: relabel the author of a memory (metadata only) --")
+prov3dir = tempfile.mkdtemp(prefix="nm-plugin-attrib-")
+prov3 = mod.NeuralMeshProvider()
+prov3.initialize("attrib", hermes_home=prov3dir)
+prov3.handle_tool_call("mesh_remember", {"content": "the deploy key rotates every 900 days"})
+store3 = os.path.join(prov3dir, mod.PROVIDER_NAME, "mesh.db")
+conn = sqlite3.connect(store3)
+nid3 = conn.execute("SELECT id FROM nodes LIMIT 1").fetchone()[0]
+meta = json.loads(conn.execute("SELECT meta FROM nodes WHERE id=?", (nid3,)).fetchone()[0])
+meta["agent_id"] = "attacker"
+conn.execute("UPDATE nodes SET meta=? WHERE id=?", (json.dumps(meta), nid3))
+conn.commit()
+conn.close()
+verdict3 = prov3.handle_tool_call("mesh_verify", {})
+print(verdict3)
+assert "FAILED" in verdict3, verdict3
+assert "attribution" in verdict3, f"the report should say WHAT changed: {verdict3}"
+assert "agent_id" in verdict3, f"the report should name the field: {verdict3}"
+
+print("\n-- an anchor outside the store is the only thing that catches a clean cut --")
+sink_dir = tempfile.mkdtemp(prefix="nm-plugin-sink-")
+sink = os.path.join(sink_dir, "anchors.jsonl")
+home = tempfile.mkdtemp(prefix="nm-plugin-anchored-")
+prov4 = mod.NeuralMeshProvider()
+os.environ["NEURAL_MESH_ANCHORS"] = sink
+prov4.initialize("anchored", hermes_home=home)
+for i in range(5):
+    prov4.handle_tool_call("mesh_remember", {"content": f"anchored fact {i} about the treasury"})
+anchored = prov4._m().ledger.anchor(target="smoke")
+print("anchored:", anchored["seq"], "->", anchored["sink"])
+assert anchored["sink"] == os.path.abspath(sink), anchored
+del os.environ["NEURAL_MESH_ANCHORS"]
+
+# attacker: cut the log, repair the store, and delete the anchor row with it
+conn = sqlite3.connect(os.path.join(home, mod.PROVIDER_NAME, "mesh.db"))
+orphans = [r[0] for r in conn.execute(
+    "SELECT node_id FROM ledger WHERE node_id != '' GROUP BY node_id HAVING MIN(seq) >= 4"
+).fetchall()]
+conn.execute("DELETE FROM ledger WHERE seq >= 4")
+conn.execute("DELETE FROM ledger_anchor")
+for n in orphans:
+    conn.execute("DELETE FROM nodes WHERE id=?", (n,))
+conn.commit()
+conn.close()
+
+# a verifier that only knows the store sees nothing wrong — honestly reported
+plain = mod.NeuralMeshProvider()
+plain.initialize("anchored", hermes_home=home)
+seen = plain.handle_tool_call("mesh_verify", {})
+print("no sink  ->", seen[:120])
+assert "OK" in seen, f"expected the in-database anchor to protect nothing: {seen}"
+
+# the same verifier, told where the anchors are kept, catches it
+sighted = mod.NeuralMeshProvider()
+sighted.initialize("anchored", hermes_home=home)
+caught = sighted.handle_tool_call("mesh_verify", {"anchors": sink})
+print("with sink ->", caught[:200])
+assert "FAILED" in caught and "anchor" in caught, caught
+
+print("\nSMOKE.v41 OK — attribution is named, and the external sink catches what the "
+      "in-database anchor cannot.")

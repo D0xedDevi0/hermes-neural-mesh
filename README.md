@@ -92,7 +92,7 @@ Six tools are registered with the agent:
 | `mesh_recall` | Search memory for what is relevant to a query |
 | `mesh_asof` | Point-in-time recall: what was true on a given date |
 | `mesh_stats` | Size, lanes, retrieval backend, and **the path of the store it is using** |
-| `mesh_verify` | Check memory has not been altered behind the agent's back — an append-only hash-chained ledger of every memory event, verified against the live store. Reports *which* invariant broke and what it means, not just true/false |
+| `mesh_verify` | Check memory has not been altered behind the agent's back — an append-only hash-chained ledger of every memory event, verified against the live store. Reports *which* invariant broke, *which field* moved, and what it means, not just true/false. Pass `anchors: <path>` to also judge against an anchor kept outside the store |
 | `mesh_provenance` | Chain of custody for one memory: who asserted it, when, and every event since (corrections, supersessions, quarantine) |
 
 ### What `mesh_verify` actually proves
@@ -102,6 +102,19 @@ when it became true, whether it was superseded — is appended to a hash-chained
 entry commits to the one before it. `mesh_verify` then checks five things: the chain is intact,
 every live memory is witnessed, no stored memory has been rewritten since it was witnessed,
 any anchored prefix still matches, and no witness outlives a memory that was deleted.
+
+A failure says *what kind* of change it was, because those are different incidents: `content`
+(the text changed), `attribution` (it is now credited to someone who did not assert it),
+`validity` (its validity window or supersession was rewritten), `coverage` (memories nothing
+witnessed), `anchor` (history cut or rewritten after anchoring), `orphan` (a memory deleted but
+its witness kept). Attribution and validity failures also name the fields that diverged.
+
+**Anchors.** An anchor stored inside the store it protects is deleted along with the entries it
+covers, so it detects nothing against an attacker with write access. Set
+`NEURAL_MESH_ANCHORS=/path/outside/the/store/anchors.jsonl` (or pass `anchors` to `mesh_verify`)
+and re-anchor periodically; a truncated log is then contradicted by the sink, while a verifier
+that only knows the store reports it as intact — which is the honest result, and the reason the
+sink is worth configuring.
 
 That is an **integrity** guarantee, not a truth guarantee: a lie is signed as faithfully as a
 fact. What it catches is the case a memory system otherwise cannot see — a stored `2 of 3`

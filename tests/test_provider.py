@@ -93,6 +93,37 @@ class ProviderTest(unittest.TestCase):
         self.assertIn("FAILED", out, out)
         self.assertIn("orphan", out, out)
 
+    def test_verify_says_when_a_green_verdict_rests_on_no_anchor(self):
+        """\"intact\" is a weaker claim without an anchor. A clean truncation of the
+        newest entries leaves the chain valid, so the tool has to say which of the
+        two verdicts this is instead of implying the stronger one."""
+        self.p.handle_tool_call("mesh_remember", {"content": "nothing is pinned yet"})
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("integrity: OK", out, out)
+        self.assertIn("Not anchored", out, out)
+        self.assertIn("truncation", out, out)
+
+    def test_verify_names_the_sink_outside_the_store_when_there_is_one(self):
+        sink = os.path.join(tempfile.mkdtemp(), "anchors.jsonl")
+        self.p.handle_tool_call("mesh_remember", {"content": "the release tag is v0.45.0"})
+        mesh = self.p._m()
+        mesh.ledger.anchor_file = sink        # what NEURAL_MESH_ANCHORS would set
+        mesh.ledger.anchor(target="test")
+        out = self.p.handle_tool_call("mesh_verify", {"anchors": sink})
+        self.assertIn("integrity: OK", out, out)
+        self.assertIn(sink, out, out)
+        self.assertIn("outside the store", out, out)
+
+    def test_verify_flags_an_anchor_that_lives_inside_the_store(self):
+        """An anchor in the database is deleted together with the entries it
+        protects, so a green verdict resting on one must not read as a guarantee."""
+        self.p.handle_tool_call("mesh_remember", {"content": "anchored in place"})
+        self.p._m().ledger.anchor(target="in-store")
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("integrity: OK", out, out)
+        self.assertIn("lives in this database", out, out)
+        self.assertIn("NEURAL_MESH_ANCHORS", out, out)
+
     def test_provenance_resolves_the_prefix_recall_shows(self):
         self.p.handle_tool_call("mesh_remember", {"content": "the bridge contract is 0xA11CE"})
         node_id = sorted(self.p._m()._load())[0]

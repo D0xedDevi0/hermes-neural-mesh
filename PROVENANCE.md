@@ -6,10 +6,10 @@ plugin is dependency-free and reviewable line by line.
 | | |
 | --- | --- |
 | Upstream | https://github.com/D0xedDevi0/NEURAL_MESH |
-| Upstream commit | `f3ed1de6` (v0.41.0) — `anchor_file` sink, per-field attestation digests, numeric coercion in `_field`; builds on `b4a9d9b0` (v0.40.0) |
-| Upstream version | `neural-mesh` 0.41.0 |
+| Upstream commit | `909c5126` (v0.45.0) — `VerifyReport.sinks` (the anchors a verdict was judged against, set before any early return), the auth-gated `POST /mesh/ledger/anchor` and `/adopt` routes, sink dedupe, and the batched/link-delta `add` path; builds on `d2a4da6d` (v0.40.0) |
+| Upstream version | `neural-mesh` 0.45.0 |
 | License | MIT (see `LICENSE`) |
-| Vendored | `neural_mesh/` — 47 Python files, 536K |
+| Vendored | `neural_mesh/` — 47 Python files, 438K |
 | Not vendored | `rust_mesh.so` (compiled acceleration), `neural_mesh/integrations/` (loads a credential file), `data/`, `bench/`, `server.py`, the HTTP service, tests and docs of the upstream project |
 
 ## Why it is vendored rather than declared as a dependency
@@ -77,16 +77,30 @@ correct — the log genuinely has no record of them — and adoption is explicit
 never silent. Adoption attests those memories **as of the moment it runs**; it does not and
 cannot prove they were never altered before it.
 
+`mesh_verify` also says what its answer rests on, because "intact" means different things with
+and without an anchor outside the store. A green verdict with no anchor proves no *recorded*
+memory was altered and says a clean truncation of the newest entries would go unnoticed; a green
+verdict backed by a sink names the file; a green verdict whose anchor lives inside the database
+says so and points at the `anchors` parameter (or `NEURAL_MESH_ANCHORS`) instead of implying a
+guarantee the store's own owner could erase.
+
 ## Keeping it current
 
-Upstream moves. To refresh the vendored copy:
+Upstream moves. Refresh the vendored copy with the script that does the copy *and* the local
+edits in one pass:
 
 ```bash
-git clone https://github.com/D0xedDevi0/NEURAL_MESH /tmp/nm
-git -C /tmp/nm checkout <commit>
-tar cf - --exclude='*.so' --exclude='__pycache__' --exclude='*.pyc' \
-    -C /tmp/nm neural_mesh | tar xf - -C .
+python3 scripts/revendor.py <upstream-ref>
 ```
 
-Then update the commit hash in this file, bump `version` in `plugin.yaml`, re-run the tests,
-and re-pin the catalog entry — the version on the entry's card must match the code behind it.
+Doing it by hand is how the two drift: the previous refresh updated `ledger.py` while
+`__init__.py` and `__main__.py` stayed one release behind, and this file named a commit that
+two of the four shipped files did not match. `scripts/revendor.py` copies the package, re-applies
+the `.integrations` removal and the `__all__` fix, and then **fails loudly** if upstream moved
+the text an edit targets — a silent no-op would ship the credential-loading import into a plugin
+whose whole claim is that it holds no credentials. It finishes by importing the vendored package,
+resolving every `__all__` name, storing and recalling a memory, and running `verify_memory`.
+
+Then update the commit hash and version in this file, bump `version` in `plugin.yaml`, re-run
+`python3 scripts/trust_check.py` and the test suite, and re-pin the catalog entry — the version
+on the entry's card must match the code behind it.

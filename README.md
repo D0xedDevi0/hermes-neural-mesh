@@ -116,6 +116,14 @@ and re-anchor periodically; a truncated log is then contradicted by the sink, wh
 that only knows the store reports it as intact — which is the honest result, and the reason the
 sink is worth configuring.
 
+A green verdict says which of those it is. With a sink, it names the file it was judged
+against. Without one, it says plainly that it proves no *recorded* memory was altered and that a
+clean truncation of the newest entries would go unnoticed — rather than reporting "intact" and
+letting the operator assume the stronger reading. If the anchor it used lives inside the
+database, it says that too, and points at `anchors` / `NEURAL_MESH_ANCHORS`. The distinction
+travels in the report itself (`sinks`, `sinks_in_store_only`), so anything rendering a verdict
+can show it.
+
 That is an **integrity** guarantee, not a truth guarantee: a lie is signed as faithfully as a
 fact. What it catches is the case a memory system otherwise cannot see — a stored `2 of 3`
 becoming `1 of 3`, an assertion by another agent relabelled as the user's, or a fact deleted to
@@ -245,7 +253,9 @@ How it works, and what it touches:
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v     # 22 tests, offline, no credentials
+python3 -m unittest discover -s tests -v     # 32 tests, offline, no credentials
+python3 scripts/trust_check.py               # no compiled artifacts, no credential-store paths
+python3 scripts/smoke_ledger_tools.py        # end-to-end: tamper, adopt, external sink
 python3 scripts/calibrate_floor.py           # reproduce the precision-floor table
 ```
 
@@ -253,8 +263,12 @@ The tests pass both against the real `MemoryProvider` ABC (`PYTHONPATH=/opt/herm
 a bare interpreter with no Hermes installed, because the plugin falls back to a local stub
 of the ABC when the real one is not importable.
 
+The vendored package is refreshed with `python3 scripts/revendor.py <upstream-ref>`, which
+copies the package, re-applies the local exclusions, and fails loudly if upstream moved the
+code those exclusions target.
+
 ## Provenance and licence
 
-MIT. The vendored `neural_mesh/` package is MIT, by the same author, pinned to upstream
-commit `fd7b35c7b5b9a61a8c7f4fbcebfdda25070a1d6e` — see [PROVENANCE.md](PROVENANCE.md) for the
-exact vendoring command, what was excluded, and why.
+MIT. The vendored `neural_mesh/` package is MIT, by the same author, pinned to upstream tag
+`v0.45.0` (`909c5126`) — see [PROVENANCE.md](PROVENANCE.md) for the exact vendoring command,
+what was excluded, and why.

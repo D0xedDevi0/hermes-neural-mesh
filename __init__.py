@@ -597,9 +597,30 @@ class NeuralMeshProvider(MemoryProvider):
                     mesh.ledger.anchor_file = os.path.abspath(args["anchors"])
                 rep = mesh.verify_memory()
                 if rep.ok:
-                    return (f"NEURAL_MESH memory integrity: OK — {rep.summary()}{head}. "
-                            f"The ledger is intact and every live memory matches what was "
-                            f"witnessed for it.")
+                    verdict = (f"NEURAL_MESH memory integrity: OK — {rep.summary()}{head}. "
+                               f"The ledger is intact and every live memory matches what was "
+                               f"witnessed for it.")
+                    # Say what the verdict rests on. "OK" with no anchor means a clean
+                    # truncation of the newest entries is invisible; an anchor stored inside
+                    # the database is deleted together with the entries it protects. A reader
+                    # who is not told which of those this is cannot weigh the answer — and the
+                    # report carries the distinction (sinks / sinks_in_store_only) whether or
+                    # not this tool renders it.
+                    sinks = list(getattr(rep, "sinks", []) or [])
+                    if sinks:
+                        verdict += (f" Anchored at #{rep.anchor_seq} to a sink outside the "
+                                    f"store: {', '.join(sinks)}.")
+                    elif rep.anchored:
+                        verdict += (f" Anchored at #{rep.anchor_seq}, but the anchor lives in "
+                                    f"this database — an attacker with write access deletes it "
+                                    f"along with the entries it protects. Pass the anchors "
+                                    f"parameter (or set NEURAL_MESH_ANCHORS) to a file outside "
+                                    f"the store to make a truncation detectable.")
+                    else:
+                        verdict += (" Not anchored: this proves no recorded memory was altered, "
+                                    "but a clean truncation of the newest entries would go "
+                                    "unnoticed. Anchor the head to catch that.")
+                    return verdict
                 # A failure is the interesting case: say which invariant broke and what it means.
                 meaning = {
                     "chain": "the event log itself was edited, reordered or truncated",

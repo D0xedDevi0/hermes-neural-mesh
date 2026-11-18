@@ -16,6 +16,12 @@ Run `python -m neural_mesh.demo` to see it work.
 """
 
 from .core import Mesh, MemoryType
+from .ledger import (ProvenanceLedger, LedgerEntry, VerifyReport, SCHEME,
+                     ANCHOR_SCHEME, BASE_CHAIN_ID, ATTEST_OPS, FORGET_OP,
+                     CONTENT_FIELDS, ATTRIBUTION_FIELDS, VALIDITY_FIELDS,
+                     content_digest, attested_digest, merkle_root,
+                     field_digests, classify_fields,
+                     read_anchors, append_anchor)
 from .meshfile import export_mesh, import_mesh
 from .sharing import merge_peer_mesh, consensus_rank, PeerPolicy, export_for_peer
 from .lora_dataset import write_jsonl, write_hf_jsonl, write_weights, summarize
@@ -27,12 +33,6 @@ from .budget import select_fit, token_estimate, default_value_score, fit_summary
 from .reader import Reader, ExtractiveReader, CallableReader
 from .lifecycle import MemoryLifecycle
 from .pointer import PointerStore, store_big_output
-from .ledger import (ProvenanceLedger, LedgerEntry, VerifyReport, SCHEME,
-                     ANCHOR_SCHEME, BASE_CHAIN_ID, ATTEST_OPS, FORGET_OP,
-                     CONTENT_FIELDS, ATTRIBUTION_FIELDS, VALIDITY_FIELDS,
-                     content_digest, attested_digest, merkle_root,
-                     field_digests, classify_fields,
-                     read_anchors, append_anchor)
 # NOTE (vendoring): upstream also exports a Helixa provenance/stamp API from
 # .integrations.helixa_provenance at this point. That subpackage is deliberately NOT vendored
 # — its signer loads a private key out of a credential file, which a plugin installed into a
@@ -122,4 +122,4 @@ __all__ = ["Mesh", "MemoryType", "export_mesh", "import_mesh",
            "export_artifact", "verify_artifact", "import_artifact",
            "serialize", "deserialize",
            "learn_plan", "record_attempt", "gaps_remaining"]
-__version__ = "0.41.0"
+__version__ = "0.45.0"

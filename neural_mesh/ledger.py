@@ -316,6 +316,16 @@ class VerifyReport:
     advice: str = ""
     head: dict = field(default_factory=dict)
     fields: list = field(default_factory=list)   # attested fields that diverged
+    sinks: list = field(default_factory=list)    # anchor files consulted, outside the store
+
+    @property
+    def sinks_in_store_only(self) -> bool:
+        """True when the verdict rests on an anchor the store's owner could delete.
+
+        Derived rather than stored so the two surfaces that render it — the HTTP
+        API and the plugin tool — cannot disagree about what "anchored" rests on.
+        """
+        return bool(self.anchored and not self.sinks)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -567,6 +577,10 @@ class ProvenanceLedger:
         rep = VerifyReport(checked=len(rows), chain_id=self.chain_id(),
                            anchored=bool(heads and heads.get("seq")),
                            anchor_seq=(heads or {}).get("seq", 0))
+        # Read once, before any early return, so every verdict says what it was
+        # judged against — including the ones that fail before the anchor check.
+        anchors = self.anchor_records()
+        rep.sinks = sorted({a["_sink"] for a in anchors if a.get("_sink")})
         tail = self.tail()
         rep.head = {"seq": tail.seq if tail else 0,
                     "entry_hash": tail.entry_hash if tail else GENESIS_PREV}
@@ -608,7 +622,7 @@ class ProvenanceLedger:
         # I4 — the anchored prefix, before the store comparison: a truncated log
         # is the more specific diagnosis, and it is what makes the difference
         # between "someone edited a memory" and "someone cut the history".
-        for anchor in self.anchor_records():
+        for anchor in anchors:
             if not anchor.get("seq"):
                 continue
             where = f" (anchored in {anchor['_sink']})" if anchor.get("_sink") else ""
@@ -816,14 +830,26 @@ class ProvenanceLedger:
                   "chain_id": self.chain_id(), "seq": tail.seq,
                   "entry_hash": tail.entry_hash, "merkle_root": root,
                   "entries": len(hashes), "ts": ts, "target": target, "detail": detail or {}}
-        sink = ""
+        sink, reused = "", False
         if self.anchor_file:
-            append_anchor(self.anchor_file, record)
             sink = os.path.abspath(self.anchor_file)
+            # Re-anchoring an unchanged head adds nothing: the earlier line
+            # already says this prefix existed. Skipping keeps each sink line a
+            # distinct prefix, so the file stays a history rather than a
+            # heartbeat, and a caller who is told the head is anchored is not
+            # paying for a new line to say so.
+            prior = read_anchors(self.anchor_file)
+            last = prior[-1] if prior else None
+            if (last and last.get("seq") == tail.seq
+                    and last.get("entry_hash") == tail.entry_hash
+                    and (last.get("merkle_root") or "") == root):
+                reused = True
+            else:
+                append_anchor(self.anchor_file, record)
         return {"anchored": True, "seq": tail.seq, "entry_hash": tail.entry_hash,
                 "merkle_root": root, "target": target, "ts": ts,
                 "covers_entries": len(hashes), "chain_id": self.chain_id(),
-                "sink": sink,
+                "sink": sink, "reused": reused,
                 "note": ("the anchored prefix cannot be rewritten or truncated below it "
                          "without verification failing"
                          + ("" if sink else " — but this anchor lives in the database "

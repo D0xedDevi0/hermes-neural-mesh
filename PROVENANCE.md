@@ -6,8 +6,8 @@ plugin is dependency-free and reviewable line by line.
 | | |
 | --- | --- |
 | Upstream | https://github.com/D0xedDevi0/NEURAL_MESH |
-| Upstream commit | `909c5126` (v0.45.0) — `VerifyReport.sinks` (the anchors a verdict was judged against, set before any early return), the auth-gated `POST /mesh/ledger/anchor` and `/adopt` routes, sink dedupe, and the batched/link-delta `add` path; builds on `d2a4da6d` (v0.40.0) |
-| Upstream version | `neural-mesh` 0.45.0 |
+| Upstream commit | `eb28a5a9` (v0.46.0) — the same package as v0.45.0 plus the version bump; the new work in v0.46.0 is `scripts/anchor_base.py` upstream, which is an operator tool and deliberately NOT vendored (it reads a wallet key), so this plugin ships no part of it. Carries `VerifyReport.sinks`, the auth-gated `POST /mesh/ledger/anchor` and `/adopt` routes, sink dedupe, and the batched/link-delta `add` path; builds on `d2a4da6d` (v0.40.0) |
+| Upstream version | `neural-mesh` 0.46.0 |
 | License | MIT (see `LICENSE`) |
 | Vendored | `neural_mesh/` — 47 Python files, 438K |
 | Not vendored | `rust_mesh.so` (compiled acceleration), `neural_mesh/integrations/` (loads a credential file), `data/`, `bench/`, `server.py`, the HTTP service, tests and docs of the upstream project |

@@ -270,5 +270,5 @@ code those exclusions target.
 ## Provenance and licence
 
 MIT. The vendored `neural_mesh/` package is MIT, by the same author, pinned to upstream tag
-`v0.45.0` (`909c5126`) — see [PROVENANCE.md](PROVENANCE.md) for the exact vendoring command,
+`v0.46.0` (`eb28a5a9`) — see [PROVENANCE.md](PROVENANCE.md) for the exact vendoring command,
 what was excluded, and why.

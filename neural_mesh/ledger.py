@@ -37,6 +37,12 @@ HONEST LIMITS (do not let anyone quote this module past them)
 * A hash chain is **not a signature**. It proves internal consistency, not
   authorship to a third party. Anyone who holds the database can rebuild a
   consistent chain from scratch.
+* That limit is why the ledger can now carry **entry signatures**: when a signer
+  key is configured, every entry is signed over its ``entry_hash`` (EIP-191)
+  and the recovered address is stored as ``author``. A signed entry then proves
+  a specific key authored it. Entries without a signature are still allowed —
+  they are honest unsigned claims, and ``verify()`` reports the signed/unsigned
+  split rather than implying every entry is authenticated.
 * That is exactly why the anchor exists. An anchored head pins the prefix
   outside the attacker's reach: rewriting any entry at or before the anchor
   breaks the anchored hash, and truncating below it is visible. **Without an
@@ -53,9 +59,11 @@ HONEST LIMITS (do not let anyone quote this module past them)
   adopted entries are counted separately. Adoption attests the store as-of now;
   it is not a witness that the store was never tampered with before.
 
-Pure stdlib: sha256 + json + sqlite. No signing, no keys, no network. Building an
-anchor transaction is a pure function returning calldata; broadcasting stays a
-separate, GO-gated step like every other on-chain path in this repo.
+Pure stdlib: sha256 + json + sqlite for the chain. Optional entry signing uses
+``eth_account`` (EIP-191 secp256k1), imported lazily so the package stays
+installable without it and the chain/verification core stays dependency-free.
+Building an anchor transaction is a pure function returning calldata; broadcasting
+stays a separate, GO-gated step like every other on-chain path in this repo.
 """
 from __future__ import annotations
 
@@ -98,7 +106,9 @@ CREATE TABLE IF NOT EXISTS ledger (
     digest     TEXT    NOT NULL DEFAULT '',
     detail     TEXT    NOT NULL DEFAULT '{}',
     prev_hash  TEXT    NOT NULL DEFAULT '',
-    entry_hash TEXT    NOT NULL DEFAULT ''
+    entry_hash TEXT    NOT NULL DEFAULT '',
+    author     TEXT    NOT NULL DEFAULT '',
+    sig        TEXT    NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_node ON ledger (node_id, seq);
 CREATE TABLE IF NOT EXISTS ledger_anchor (
@@ -271,6 +281,61 @@ def _entry_hash(seq: int, ts: float, op: str, node_id: str, agent_id: str,
 
 
 # --------------------------------------------------------------------------- #
+# entry signatures — authorship, not just consistency
+# --------------------------------------------------------------------------- #
+# A hash chain proves nobody rewrote history *after the fact*; a signature proves
+# a specific key authored an entry. Entries are signed over their ``entry_hash``
+# (EIP-191 personal-sign, so a ledger signature can never be replayed as a
+# transaction signature). ``eth_account`` is imported lazily so the chain itself
+# stays pure stdlib and the package stays installable without it.
+def sign_entry(entry_hash: str, private_key: str) -> tuple[str, str]:
+    """(author_address, signature_hex) for one 64-hex ``entry_hash``."""
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+    key = private_key if private_key.startswith("0x") else "0x" + private_key
+    acct = Account.from_key(key)
+    signed = acct.sign_message(encode_defunct(hexstr=entry_hash))
+    return acct.address, signed.signature.hex()
+
+
+def recover_author(entry_hash: str, sig: str) -> str:
+    """The address that signed ``entry_hash``, or '' if it does not recover."""
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+    try:
+        return Account.recover_message(
+            encode_defunct(hexstr=entry_hash), signature=bytes.fromhex(sig))
+    except Exception:
+        return ""
+
+
+def has_signing_lib() -> bool:
+    try:
+        import eth_account  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def check_signature(entry_hash: str, sig: str, author: str) -> str:
+    """'ok' | 'forged' | 'unchecked' for one signed entry.
+
+    'forged' means the signature is present but does not recover to the claimed
+    author. 'unchecked' means the signing library is unavailable here — the
+    signature may still be valid, but this process cannot say, and it must not
+    pretend to.
+    """
+    if not sig:
+        return "unsigned"
+    if not has_signing_lib():
+        return "unchecked"
+    rec = recover_author(entry_hash, sig)
+    if not rec:
+        return "forged"
+    return "ok" if rec.lower() == author.lower() else "forged"
+
+
+# --------------------------------------------------------------------------- #
 # records
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -285,6 +350,8 @@ class LedgerEntry:
     detail: dict = field(default_factory=dict)
     prev_hash: str = GENESIS_PREV
     entry_hash: str = ""
+    author: str = ""
+    sig: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -292,6 +359,10 @@ class LedgerEntry:
     @property
     def is_genesis(self) -> bool:
         return self.seq == 1
+
+    @property
+    def signed(self) -> bool:
+        return bool(self.sig)
 
     def line(self) -> str:
         who = self.agent_id or "self"
@@ -317,6 +388,14 @@ class VerifyReport:
     head: dict = field(default_factory=dict)
     fields: list = field(default_factory=list)   # attested fields that diverged
     sinks: list = field(default_factory=list)    # anchor files consulted, outside the store
+    signed: int = 0        # entries whose signature recovered to their author
+    unsigned: int = 0      # entries with no signature
+    unchecked: int = 0     # signed entries this process could not verify (no lib)
+    bindings: dict = field(default_factory=dict)  # label -> address, per the registry
+    bindings_source: str = ""   # registry consulted ('' = binding check not enabled)
+    unbound_signed: int = 0     # signed entries whose label has no binding (advisory)
+    unbound_labels: list = field(default_factory=list)
+    bindings_pinned: str = ""   # independent registry head enforced ('' = not pinned)
 
     @property
     def sinks_in_store_only(self) -> bool:
@@ -333,6 +412,14 @@ class VerifyReport:
     def summary(self) -> str:
         if self.ok:
             tail = f", {self.adopted} adopted" if self.adopted else ""
+            if self.signed:
+                tail += f", {self.signed} signed"
+            if self.unchecked:
+                tail += f", {self.unchecked} signatures unverified here"
+            if self.bindings:
+                tail += f", {len(self.bindings)} label(s) bound"
+            if self.unbound_signed:
+                tail += f", {self.unbound_signed} signed under an unbound label"
             return (f"ledger OK — {self.checked} entries verified over {self.nodes} "
                     f"live memories{tail}; head #{self.head.get('seq', 0)}; "
                     f"anchored: {'yes @#' + str(self.anchor_seq) if self.anchored else 'no'}")
@@ -354,16 +441,34 @@ class ProvenanceLedger:
     """
 
     def __init__(self, get_conn: Callable[[], Any], clock: Callable[[], float] = time.time,
-                 lock: Any = None, anchor_file: str = ""):
+                 lock: Any = None, anchor_file: str = "", signer: str = "",
+                 identities_path: str = "", identities_head: str = ""):
         self._get_conn = get_conn
         self._clock = clock
         self._lock = lock
         self._digest_cache: dict[str, str] = {}
+        # Optional author key (EVM private-key hex). When set, every entry this
+        # ledger appends is signed over its entry_hash and the recovered address
+        # is stored as ``author`` — turning "tamper-evident" into "authenticated".
+        # Empty (default) means unsigned entries, which is honest but not proof
+        # of authorship.
+        self._signer = signer
         # An anchor the attacker cannot rewrite. The in-database anchor record is
         # convenient but useless against anyone who can write the database — they
         # delete it along with the entries it protects. A sink outside the store
         # (another host, a git-committed file, a chain) is the actual remedy.
         self.anchor_file = anchor_file
+        # External, signed agent-identity registry (label -> address). When set,
+        # verify() stops accepting "a signature recovered" as sufficient: the key
+        # that signed an entry must ALSO be the address the registry binds to the
+        # label the entry claims. A signature proves *a* key wrote the entry;
+        # only the binding proves whose label it was written under. Left empty,
+        # binding is not checked at all - which is honest, not safe.
+        self._identities_path = identities_path
+        # The independently retained registry head. Without it, verification proves
+        # the registry is internally consistent - which a writer of that registry
+        # can arrange. With it, a rewritten or silently extended registry is caught.
+        self._identities_head = identities_head
         self._ensure_schema()
 
     # -- storage helpers ----------------------------------------------------
@@ -385,6 +490,21 @@ class ProvenanceLedger:
 
     def _ensure_schema(self) -> None:
         self.conn.executescript(_SCHEMA)
+        self.conn.commit()
+        self._migrate_columns()
+
+    def _migrate_columns(self) -> None:
+        """Idempotently add columns introduced after the initial schema.
+
+        ``CREATE TABLE IF NOT EXISTS`` never touches an existing table, so a
+        ledger created before signatures must be widened in place. PRAGMA
+        table_info is read-only; each missing column is added and committed.
+        """
+        have = {r["name"] for r in self.conn.execute("PRAGMA table_info(ledger)").fetchall()}
+        for col, decl in (("author", "TEXT NOT NULL DEFAULT ''"),
+                          ("sig", "TEXT NOT NULL DEFAULT ''")):
+            if col not in have:
+                self.conn.execute(f"ALTER TABLE ledger ADD COLUMN {col} {decl}")
         self.conn.commit()
 
     # -- append -------------------------------------------------------------
@@ -432,12 +552,22 @@ class ProvenanceLedger:
         seq = int(cur.lastrowid)
         entry_hash = _entry_hash(seq, ts, op, node_id, agent_id, source, digest,
                                  detail_json, prev_hash)
-        conn.execute("UPDATE ledger SET entry_hash=? WHERE seq=?", (entry_hash, seq))
+        author = sig = ""
+        if self._signer:
+            # Configured signing must fail closed, never emit an unsigned claim.
+            try:
+                author, sig = sign_entry(entry_hash, self._signer)
+            except Exception:
+                if began:
+                    conn.rollback()
+                raise
+        conn.execute("UPDATE ledger SET entry_hash=?, author=?, sig=? WHERE seq=?",
+                     (entry_hash, author, sig, seq))
         if began:
             conn.commit()
         entry = LedgerEntry(seq=seq, ts=ts, op=op, node_id=node_id, agent_id=agent_id,
                             source=source, digest=digest, detail=json.loads(detail_json),
-                            prev_hash=prev_hash, entry_hash=entry_hash)
+                            prev_hash=prev_hash, entry_hash=entry_hash, author=author, sig=sig)
         if node_id and digest:
             self._digest_cache[node_id] = digest
         return entry
@@ -514,7 +644,8 @@ class ProvenanceLedger:
                            node_id=get("node_id") or "", agent_id=get("agent_id") or "",
                            source=get("source") or "", digest=get("digest") or "",
                            detail=detail, prev_hash=get("prev_hash") or "",
-                           entry_hash=get("entry_hash") or "")
+                           entry_hash=get("entry_hash") or "", author=get("author") or "",
+                           sig=get("sig") or "")
 
     def count(self) -> int:
         return int(self.conn.execute("SELECT COUNT(*) AS c FROM ledger").fetchone()["c"])
@@ -541,9 +672,14 @@ class ProvenanceLedger:
         for row in self._rows("SELECT op, COUNT(*) AS c FROM ledger GROUP BY op"):
             by_op[row["op"]] = int(row["c"])
         h = self.head()
+        signed = int(self.conn.execute(
+            "SELECT COUNT(*) AS c FROM ledger WHERE sig != ''").fetchone()["c"])
+        unsigned = int(self.conn.execute(
+            "SELECT COUNT(*) AS c FROM ledger WHERE sig = ''").fetchone()["c"])
         return {"entries": h["entries"], "by_op": by_op, "head_seq": h["seq"],
                 "chain_id": h["chain_id"], "anchored": h["anchored"],
-                "anchor_seq": h["anchor_seq"], "scheme": SCHEME}
+                "anchor_seq": h["anchor_seq"], "scheme": SCHEME,
+                "signed": signed, "unsigned": unsigned}
 
     # -- chain of custody ---------------------------------------------------
     def provenance(self, node_id: str) -> dict:
@@ -618,6 +754,72 @@ class ProvenanceLedger:
                                   f"itself was edited")
             prev, last_seq = e.entry_hash, e.seq
         rep.head = {"seq": last_seq, "entry_hash": prev}
+
+        # I6 — authorship. A signed entry must recover to the address it claims.
+        # This runs after the chain check so a rewritten entry_hash fails on the
+        # chain before its (necessarily broken) signature is even consulted.
+        signed_ok: list = []
+        for row in rows:
+            e = self._entry(row)
+            verdict = check_signature(e.entry_hash, e.sig, e.author)
+            if verdict == "ok":
+                rep.signed += 1
+                signed_ok.append(e)
+            elif verdict == "forged":
+                return self._fail(rep, e.seq, "signature", e.node_id,
+                                  f"entry #{e.seq} claims author {e.author[:10]}… but "
+                                  f"its signature does not recover to that address — "
+                                  f"the signature was edited or forged")
+            elif verdict == "unchecked":
+                rep.unchecked += 1
+            else:
+                rep.unsigned += 1
+
+        # I7 - the label claim. I6 proves that the key which signed an entry is
+        # the key whose address is stored beside it; it says nothing about the
+        # agent_id in the same row. Without this check, anyone holding a key of
+        # their own could sign an entry claiming to be a label they do not
+        # control, and verify() would report it as authenticated authorship. The
+        # external registry is the only thing that ties a label to an address.
+        if self._identities_path:
+            rep.bindings_source = self._identities_path
+            rep.bindings_pinned = self._identities_head
+            from .identity_registry import verify_registry
+            reg = verify_registry(self._identities_path, rep.chain_id,
+                                  self._identities_head or None)
+            if not reg["ok"]:
+                # Fail closed: a registry that cannot be read, or does not
+                # verify, is exactly the state in which "everyone is who they
+                # say" would otherwise be assumed.
+                return self._fail(rep, 0, "binding", "",
+                                  f"identity registry {self._identities_path} does "
+                                  f"not verify ({reg['reason']}) - no label can be "
+                                  f"resolved, so every signed authorship claim is "
+                                  f"unchecked")
+            rep.bindings = {label: rec["address"]
+                            for label, rec in reg["bindings"].items()}
+            for e in signed_ok:
+                label = e.agent_id or "self"
+                want = rep.bindings.get(label)
+                if want is None:
+                    # Advisory, not fatal: labels that predate the registry still
+                    # have to verify, so an unbound write is counted and named
+                    # rather than silently treated as authenticated.
+                    rep.unbound_signed += 1
+                    if label not in rep.unbound_labels and len(rep.unbound_labels) < 20:
+                        rep.unbound_labels.append(label)
+                    continue
+                if want.lower() != e.author.lower():
+                    return self._fail(rep, e.seq, "binding", e.node_id,
+                                      f"entry #{e.seq} is signed by {e.author[:10]} "
+                                      f"but the identity registry binds {label} to "
+                                      f"{want[:10]} - the signature is real, the "
+                                      f"label claim is not")
+            if rep.unbound_signed:
+                lead = ("bind " + ", ".join(rep.unbound_labels)
+                        + " in the identity registry to attribute signed entries "
+                          "to a bound address")
+                rep.advice = f"{rep.advice} {lead}".strip() if rep.advice else lead
 
         # I4 — the anchored prefix, before the store comparison: a truncated log
         # is the more specific diagnosis, and it is what makes the difference
@@ -955,6 +1157,7 @@ class ProvenanceLedger:
                 bundle["chain_id"] != expect_chain_id:
             return {"ok": False, "reason": "bundle chain_id does not match the expected ledger"}
         prev = GENESIS_PREV
+        signed = unsigned = unchecked = 0
         for i, raw in enumerate(evs):
             detail = json.dumps(raw.get("detail") or {}, sort_keys=True,
                                 separators=(",", ":"), ensure_ascii=True, default=str)
@@ -969,6 +1172,17 @@ class ProvenanceLedger:
             if want != raw.get("entry_hash"):
                 return {"ok": False, "checked": i, "broken_at": raw.get("seq"),
                         "reason": "entry hash does not recompute — the bundle was edited"}
+            verdict = check_signature(want, raw.get("sig") or "", raw.get("author") or "")
+            if verdict == "ok":
+                signed += 1
+            elif verdict == "forged":
+                return {"ok": False, "checked": i, "broken_at": raw.get("seq"),
+                        "reason": f"entry {raw.get('seq')} signature does not recover to "
+                                  f"its claimed author — forged or edited"}
+            elif verdict == "unchecked":
+                unchecked += 1
+            else:
+                unsigned += 1
             prev = raw["entry_hash"]
         head = bundle.get("head") or {}
         if head.get("entry_hash") and evs and evs[-1]["entry_hash"] != head["entry_hash"]:
@@ -976,7 +1190,8 @@ class ProvenanceLedger:
                     "reason": "claimed head does not equal the last bundled entry — "
                               "events were withheld from the bundle"}
         return {"ok": True, "checked": len(evs), "chain_id": bundle.get("chain_id", ""),
-                "head_seq": head.get("seq", 0), "reason": "chain verified"}
+                "head_seq": head.get("seq", 0), "reason": "chain verified",
+                "signed": signed, "unsigned": unsigned, "unchecked": unchecked}
 
 
 class _Missing:

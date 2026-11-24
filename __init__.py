@@ -437,10 +437,12 @@ class NeuralMeshProvider(MemoryProvider):
                     "Check that long-term memory has not been altered behind the agent's back. "
                     "Verifies an append-only hash-chained ledger of memory events: chain integrity, "
                     "every live memory witnessed, content still matching its witness, anchored "
-                    "prefix intact, no witness outliving its memory. Use when asked whether memory "
-                    "is trustworthy/tampered, after a suspected injection or restore, or as a "
-                    "periodic self-check. Reports the first failure and what it means, not just "
-                    "true/false."
+                    "prefix intact, no witness outliving its memory, and -- when the ledger "
+                    "signs entries -- that each signature recovers to the address it claims and "
+                    "that the identity registry binds the label it claims. Use when asked whether "
+                    "memory is trustworthy/tampered, after a suspected injection or restore, or as "
+                    "a periodic self-check. Reports the first failure and what it means, and how "
+                    "much authorship was actually checked, not just true/false."
                 ),
                 "parameters": {
                     "type": "object",
@@ -620,6 +622,33 @@ class NeuralMeshProvider(MemoryProvider):
                         verdict += (" Not anchored: this proves no recorded memory was altered, "
                                     "but a clean truncation of the newest entries would go "
                                     "unnoticed. Anchor the head to catch that.")
+                    # v0.47/v0.48: a verdict can also rest on signatures and identity
+                    # bindings. "OK" must not read as "authorship was proven" when nothing
+                    # was checked, or when the signing key is bound to no label -- a
+                    # signature proves a key signed, not which agent it was.
+                    signed = int(getattr(rep, "signed", 0) or 0)
+                    unchecked = int(getattr(rep, "unchecked", 0) or 0)
+                    if signed or unchecked:
+                        verdict += (f" Authorship: {signed} ledger "
+                                    f"entr{'y' if signed == 1 else 'ies'} carry a signature "
+                                    f"that verified")
+                        if unchecked:
+                            verdict += (f"; {unchecked} more are signed but were NOT verified "
+                                        f"here (the signing library is unavailable to this "
+                                        f"process), so those are unchecked, not good")
+                        verdict += "."
+                    unbound = int(getattr(rep, "unbound_signed", 0) or 0)
+                    if unbound:
+                        labels = ", ".join(str(x) for x in
+                                           (getattr(rep, "unbound_labels", None) or [])[:5])
+                        verdict += (f" {unbound} signed "
+                                    f"entr{'y' if unbound == 1 else 'ies'} signed under "
+                                    f"label(s) the identity registry does not bind"
+                                    + (f" ({labels})" if labels else "")
+                                    + " -- the key is real, the label is unproven.")
+                    elif signed and not str(getattr(rep, "bindings_source", "") or ""):
+                        verdict += (" No identity registry was consulted, so those signatures "
+                                    "prove a key signed each entry, not which agent did.")
                     return verdict
                 # A failure is the interesting case: say which invariant broke and what it means.
                 meaning = {
@@ -635,7 +664,19 @@ class NeuralMeshProvider(MemoryProvider):
                                 "(written behind the API, or predating the ledger)",
                     "anchor": "history was rewritten or cut after the head was anchored",
                     "orphan": "a memory was deleted but its witness remains",
-                }.get(rep.kind, "an integrity invariant failed")
+                    # Kinds added upstream in v0.47/v0.48. Without these two, the most
+                    # security-relevant verdicts the ledger can now reach -- a forged
+                    # signature, and a real signature under a label the registry does not
+                    # bind -- would render as the generic fallback, which says nothing.
+                    "signature": "an entry's signature does not recover to the author it "
+                                 "claims (the signature was edited or forged)",
+                    "binding": "an entry is signed by a key the identity registry does not "
+                               "bind to the label it claims -- the signature is real, the "
+                               "label claim is not",
+                }.get(rep.kind) or (
+                    f"a check this build does not know failed ({rep.kind or 'no kind given'}) "
+                    f"-- the reason above is the authoritative one, and this plugin needs "
+                    f"updating to name that kind properly")
                 extra = ""
                 if rep.kind in ("attribution", "validity") and getattr(rep, "fields", None):
                     extra += (f" Fields that diverged: {', '.join(rep.fields)}.")

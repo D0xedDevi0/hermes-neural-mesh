@@ -124,6 +124,105 @@ class ProviderTest(unittest.TestCase):
         self.assertIn("lives in this database", out, out)
         self.assertIn("NEURAL_MESH_ANCHORS", out, out)
 
+    # ── signed entries and identity bindings (upstream v0.47/v0.48) ─────────────
+
+    # The canonical, publicly documented throwaway test key (anvil/hardhat account #0).
+    # Never funded, never used anywhere real: it exists so a signature test needs no secret.
+    SIGNER_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+    def _signed_mesh(self):
+        """(mesh, db_path) whose ledger signs every entry, or (None, None) without eth_account."""
+        from neural_mesh import Mesh
+        from neural_mesh.ledger import has_signing_lib
+        if not has_signing_lib():
+            return None, None
+        path = os.path.join(tempfile.mkdtemp(prefix="nm-signed-"), "signed.db")
+        return Mesh(path, signer=self.SIGNER_KEY), path
+
+    def test_verify_names_a_forged_signature_rather_than_a_generic_failure(self):
+        """For a signing ledger the sharpest verdict is a signature that no longer
+        recovers to the author it claims -- the signature was edited. If this build
+        renders that as "an integrity invariant failed" it has flattened the one result
+        an operator must act on, so the kind has to name itself."""
+        import sqlite3
+        mesh, path = self._signed_mesh()
+        if mesh is None:
+            self.skipTest("eth_account not installed: cannot produce a signed entry")
+        mesh.add("the release tag is v0.48.0")
+        self.assertGreater(mesh.verify_memory().signed, 0, "the ledger should have signed")
+        conn = sqlite3.connect(path)
+        conn.execute("UPDATE ledger SET sig=? WHERE seq=(SELECT max(seq) FROM ledger)",
+                     ("ab" * 65,))
+        conn.commit()
+        conn.close()
+        self.p._m = lambda: mesh
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("FAILED", out, out)
+        self.assertIn("signature", out, out)
+        self.assertIn("does not recover", out, out)
+        self.assertNotIn("an integrity invariant failed", out, out)
+
+    def test_verify_says_how_much_authorship_it_actually_checked(self):
+        """A signed ledger proves a key signed each entry. "OK" must not read as
+        "authorship was proven" unless it also says how many signatures verified -- and
+        that no registry tied the key to a label."""
+        mesh, _ = self._signed_mesh()
+        if mesh is None:
+            self.skipTest("eth_account not installed: cannot produce a signed entry")
+        mesh.add("a signed fact")
+        self.p._m = lambda: mesh
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("integrity: OK", out, out)
+        self.assertIn("Authorship:", out, out)
+        self.assertIn("verified", out, out)
+        self.assertIn("No identity registry", out, out)
+
+    def test_verify_never_flattens_a_kind_it_does_not_know(self):
+        """A verdict kind added upstream must surface as itself: the old fallback text
+        ("an integrity invariant failed") is the vagueness this lane exists to remove."""
+        from neural_mesh.ledger import VerifyReport
+
+        class _Stub:
+            ledger = object()
+
+            def __init__(self, r): self._r = r
+
+            def verify_memory(self): return self._r
+
+        rep = VerifyReport(unexplained=[], head={"seq": 7}, fields=[], sinks=[],
+                           bindings={}, unbound_labels=[])
+        rep.ok, rep.kind, rep.broken_at = False, "future-kind", 7
+        rep.reason = "something new broke"
+        self.p._m = lambda: _Stub(rep)
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("future-kind", out, out)
+        self.assertIn("does not know failed", out, out)
+        self.assertNotIn("an integrity invariant failed", out, out)
+
+    def test_verify_names_labels_the_registry_does_not_bind(self):
+        """An unbound signed entry is advisory, not fatal -- but a green verdict that
+        omits it implies the signer's identity was established when it was not."""
+        from neural_mesh.ledger import VerifyReport
+
+        class _Stub:
+            ledger = object()
+
+            def __init__(self, r): self._r = r
+
+            def verify_memory(self): return self._r
+
+        rep = VerifyReport(unexplained=[], head={"seq": 9, "entry_hash": "ab" * 32},
+                           fields=[], sinks=[], bindings={},
+                           unbound_labels=["scanner-bot", "fresh-launch"])
+        rep.ok, rep.checked, rep.nodes, rep.anchored = True, 9, 9, False
+        rep.signed, rep.unbound_signed = 3, 2
+        self.p._m = lambda: _Stub(rep)
+        out = self.p.handle_tool_call("mesh_verify", {})
+        self.assertIn("integrity: OK", out, out)
+        self.assertIn("does not bind", out, out)
+        self.assertIn("scanner-bot", out, out)
+        self.assertNotIn("not which agent", out, out)
+
     def test_provenance_resolves_the_prefix_recall_shows(self):
         self.p.handle_tool_call("mesh_remember", {"content": "the bridge contract is 0xA11CE"})
         node_id = sorted(self.p._m()._load())[0]

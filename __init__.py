@@ -99,6 +99,12 @@ BM25_STOPWORDS = frozenset(
 _DF_CACHE: dict = {}
 
 
+def bm25_terms(text: str) -> list:
+    """Query terms as written, stop-words removed. Used for coverage accounting."""
+    words = re.findall(r"[a-z0-9_./:-]+", (text or "").lower())
+    return [w for w in words if w not in BM25_STOPWORDS]
+
+
 def bm25_query(text: str) -> str:
     """Query text with stop-words removed, plus singular/plural variants.
 
@@ -106,9 +112,8 @@ def bm25_query(text: str) -> str:
     terms. Emitting both forms costs one lookup and stops a plural from hiding
     a memory the user clearly meant.
     """
-    words = [w for w in re.findall(r"[a-z0-9_./:-]+", (text or "").lower()) if w not in BM25_STOPWORDS]
     out = []
-    for w in words:
+    for w in bm25_terms(text):
         out.append(w)
         if len(w) > 3:
             if w.endswith("s"):
@@ -253,10 +258,12 @@ class NeuralMeshProvider(MemoryProvider):
             # so the denominator there counts only terms the corpus knows.
             if n < 50:
                 floor = 0.0
-                total = _query_idf(terms, df, n, matched_only=True)
+                total = _query_idf(bm25_terms(query), df, n, matched_only=True)
             else:
                 floor = BM25_INJECT_COVERAGE if float(min_score or 0.0) >= 0.2 else BM25_TOOL_COVERAGE
-                total = _query_idf(terms, df, n)
+                # Coverage counts the words the user actually typed: the plural
+                # variants are a matching aid, not extra evidence to be found.
+                total = _query_idf(bm25_terms(query), df, n)
             total = _query_idf(terms, df, n)
             if not total:
                 return []

@@ -249,7 +249,11 @@ class RemoteMesh:
         # for about half the probes) and returns no score at all. Ask for a wide
         # candidate set and rerank it here with the same BM25 + IDF-coverage code the
         # local path uses, so min_score means the same thing against either store.
-        wide = max(int(top_k) * 6, 60)
+        # Measured on the canonical store (5,495 nodes): 60 candidates found the
+        # answer for 9 of 20 probes, 200 for 17, 300 for 19 — the service's own
+        # ranking is the ceiling, so the window has to be this wide before local
+        # BM25 gets a fair look. 300 costs ~0.2s against the live service.
+        wide = max(int(top_k) * 6, 300)
         out = self._call("/mesh/recall", {"query": str(query), "limit": wide})
         hits = self._nodes(out.get("results"))
         if not hits:

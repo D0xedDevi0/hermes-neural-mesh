@@ -103,6 +103,11 @@ _CACHE_MAX = 4
 
 def _index_for(mesh, nodes):
     db = getattr(mesh, "db", None)
+    if db is None:
+        # No store to key on (a remote handle, for instance). Caching on id(nodes)
+        # is wrong: CPython recycles list ids, so a later candidate set of the same
+        # length can be handed a stale index and rank against the wrong documents.
+        return _Index([(getattr(n, "id", ""), getattr(n, "content", "")) for n in nodes])
     key = None
     try:
         key = (db.execute("PRAGMA database_list").fetchone()[2], len(nodes))

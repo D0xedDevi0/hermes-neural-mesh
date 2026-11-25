@@ -64,6 +64,18 @@ class RankingTest(unittest.TestCase):
         unfiltered = bm25.rank(self.mesh, "deploy key rotation", self.nodes, top_k=1)
         self.assertEqual(unfiltered[0][1].id, "a")
 
+    def test_equal_length_candidate_sets_are_not_confused(self):
+        # A remote handle has no .db, so the index cache used to key on id(nodes):
+        # two same-length lists could share an id after the first was collected and
+        # the second would be ranked against the first one's documents.
+        mesh = FakeMesh()
+        first = [Node("x", "alpha bravo"), Node("y", "charlie delta")]
+        second = [Node("p", "echo foxtrot"), Node("q", "golf hotel")]
+        r1 = bm25.rank(mesh, "alpha", first, top_k=1)
+        r2 = bm25.rank(mesh, "echo", second, top_k=1)
+        self.assertEqual([n.id for _, n in r1], ["x"])
+        self.assertEqual([n.id for _, n in r2], ["p"])
+
     def test_top_k_is_respected(self):
         hits = bm25.rank(self.mesh, "the deploy key tuesday bullets", self.nodes, top_k=2)
         self.assertLessEqual(len(hits), 2)

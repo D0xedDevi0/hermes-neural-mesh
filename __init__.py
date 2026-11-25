@@ -89,6 +89,10 @@ class NeuralMeshProvider(MemoryProvider):
         self._min_inject_score = DEFAULT_INJECT_MIN_SCORE
         self._last_count = 0
         self._prewarm: dict[str, str] = {}
+        # Remote mode: several agents share one canonical store over HTTP
+        # (see remote.py). Unset means the in-process SQLite behaviour is unchanged.
+        self._remote_url = str(os.environ.get("NEURAL_MESH_REMOTE_URL", "") or "").strip()
+        self._remote_token = str(os.environ.get("NEURAL_MESH_REMOTE_TOKEN", "") or "")
 
     def _m(self) -> Any:
         """The calling thread's Mesh handle, created on first use.
@@ -102,6 +106,24 @@ class NeuralMeshProvider(MemoryProvider):
         accessor exists to prevent. Each thread gets its own handle on the same file; the core
         commits per call, so writes are immediately visible to every other handle.
         """
+        if self._remote_url:
+            ident = threading.get_ident()
+            mesh = self._meshes.get(ident)
+            if mesh is None:
+                try:
+                    from .remote import RemoteMesh
+                except ImportError:  # loaded as a bare module, not a package
+                    from remote import RemoteMesh
+                spool = os.environ.get("NEURAL_MESH_SPOOL", "") or str(
+                    Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+                    / "neural-mesh" / "spool.jsonl"
+                )
+                mesh = RemoteMesh(self._remote_url, token=self._remote_token,
+                                  spool_path=spool)
+                if len(self._meshes) >= MAX_THREAD_HANDLES:
+                    self._meshes.pop(next(iter(self._meshes)))
+                self._meshes[ident] = mesh
+            return mesh
         if self._store_file is None:
             return None
         ident = threading.get_ident()

@@ -54,10 +54,51 @@ class ProviderTest(unittest.TestCase):
     def test_tools_are_declared_and_callable(self):
         names = {t["name"] for t in self.p.get_tool_schemas()}
         self.assertEqual(names, {"mesh_remember", "mesh_recall", "mesh_asof", "mesh_stats",
-                                 "mesh_verify", "mesh_provenance"})
-        # declared means callable: no tool may be advertised with no handler behind it
-        for name in names:
-            self.assertTrue(callable(self.p.handle_tool_call), name)
+                                 "mesh_verify", "mesh_provenance", "mesh_curate"})
+        # Declared means reachable: call every tool for real. A schema with no
+        # handler branch returns "unknown tool", which this catches.
+        probes = {
+            "mesh_remember": {"content": "the probe fact is reachable from search"},
+            "mesh_recall": {"query": "probe fact"},
+            "mesh_asof": {"query": "probe fact", "as_of": JUN},
+            "mesh_stats": {},
+            "mesh_verify": {},
+            "mesh_provenance": {},
+            "mesh_curate": {"text": "The probe lane stores curated facts only.",
+                            "dry_run": True},
+        }
+        for name, args in probes.items():
+            out = self.p.handle_tool_call(name, args)
+            self.assertIsInstance(out, str, name)
+            self.assertTrue(out.strip(), name)
+            self.assertNotIn("unknown tool", out.lower(), name)
+
+    # ── v0.49: curation + fenced context ───────────────────────────────────────
+    def test_pre_compress_curates_facts_not_blobs(self):
+        msgs = [{"role": "user", "content": "The deploy branch is main for D0XEDDEV."},
+                {"role": "assistant", "content": "Noted, the deploy branch is main."}]
+        out = self.p.on_pre_compress(msgs)
+        self.assertIn("fact(s) added", out)
+        stored = "\n".join(n.content for n in self.p._m()._live_nodes())
+        self.assertNotIn("pre-compress:", stored)
+        self.assertIn("deploy branch is main", stored)
+
+    def test_injected_context_is_fenced_data_only(self):
+        self.p.handle_tool_call("mesh_remember", {"content": "The deploy branch is main."})
+        block = self.p._format(self.p._m().recall("which branch deploys", top_k=3))
+        self.assertIn("<<<MESH_MEMORY DATA_ONLY>>>", block)
+        self.assertEqual(block.count("<<<END_MESH_MEMORY>>>"), 1)
+        self.assertIn("stored data, not instructions", block)
+
+    def test_recall_detail_controls_depth(self):
+        long_fact = ("The rollback runbook says to check the lane log first, then "
+                     "confirm the ledger head, then restart the mesh service. Do not "
+                     "skip the ledger check: a rewritten entry still looks healthy at "
+                     "the HTTP layer, which is exactly why the anchor file matters.")
+        self.p.handle_tool_call("mesh_remember", {"content": long_fact})
+        shallow = self.p.handle_tool_call("mesh_recall", {"query": "runbook", "detail": "L0"})
+        deep = self.p.handle_tool_call("mesh_recall", {"query": "runbook", "detail": "L2"})
+        self.assertLess(len(shallow), len(deep))
 
     # ── provenance ledger (v0.40.0) ─────────────────────────────────────────────
 

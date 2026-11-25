@@ -84,12 +84,13 @@ hermes config set memory.provider yantrikdb   # or whichever provider you used b
 
 ## Tools
 
-Six tools are registered with the agent:
+Seven tools are registered with the agent:
 
 | Tool | What it does |
 | --- | --- |
 | `mesh_remember` | Store a fact, with optional `kind` (semantic / episodic / procedural / working), `valid_from`, and `supersedes` |
-| `mesh_recall` | Search memory for what is relevant to a query |
+| `mesh_recall` | Search memory for what is relevant to a query. `detail` picks depth: `auto` (top hit full, tail as gists), `L0` gists, `L2` full text |
+| `mesh_curate` | Ingest a note, transcript or MEMORY.md block as **curated single facts** — ADD / UPDATE (supersedes) / NOOP / QUARANTINE. Use instead of `mesh_remember` for bulk text; `dry_run` shows the decisions without writing |
 | `mesh_asof` | Point-in-time recall: what was true on a given date |
 | `mesh_stats` | Size, lanes, retrieval backend, and **the path of the store it is using** |
 | `mesh_verify` | Check memory has not been altered behind the agent's back — an append-only hash-chained ledger of every memory event, verified against the live store. Reports *which* invariant broke, *which field* moved, and what it means, not just true/false. Pass `anchors: <path>` to also judge against an anchor kept outside the store |
@@ -161,6 +162,21 @@ memory — the scanning described above reduces accidental poisoning, it does no
 store a secret store.
 
 ## Measured behaviour
+
+### v0.49 — curation decisions and context depth
+
+Deterministic benchmark, no LLM, no network (upstream `bench/curation_bench.py`):
+
+- **Curation: 17/17** labelled cases — 6 value changes → UPDATE, 6 restatements →
+  NOOP (3 exact, 3 rephrased), 3 new facts → ADD, 2 poisoned inputs → QUARANTINE.
+- **Long notes** (880 chars, answer at offset 726): the old flat-400 renderer kept
+  **0/8** answers; tiered+fenced kept **8/8** at 26% fewer total characters.
+- **Short facts**: flat-400 is *cheaper* (281 vs 641 chars median) — the fence has
+  a fixed premium. Tiering is not a byte win on short memories and this release
+  does not claim it is.
+
+n=17 is small and the near-duplicate threshold was tuned on it; treat the
+decision score as a calibrated heuristic, not a validated classifier.
 
 ### The precision floor
 

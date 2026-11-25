@@ -1,4 +1,4 @@
 name: neural-mesh
-version: 0.48.0
+version: 0.49.0
 description: "NEURAL_MESH for Hermes — self-organizing, self-forgetting long-term memory with bi-temporal recall. Resonance + BM25 retrieval over an auto-linking typed graph, point-in-time recall (mesh_asof), supersession instead of overwrite, and memory-poisoning quarantine, and a tamper-evident provenance ledger (mesh_verify / mesh_provenance) that proves no stored memory was rewritten behind the agent's back -- and, when the ledger is configured to sign entries, that each signature recovers to the address it claims and the identity registry binds the label it claims. Pure Python, in-process, stdlib only: no API keys, no network, no compiled binary, no credential files. Signing stays off unless a caller injects a key, and eth_account is imported lazily, so the default install needs nothing beyond the standard library."
 requires_hermes: ">=0.22.0"

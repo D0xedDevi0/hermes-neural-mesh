@@ -22,6 +22,7 @@ TOKEN = "test-token"
 class Stub:
     def __init__(self):
         self.adds = []
+        self.last_recall_body = {}
         self.auth = []
         self.verify_status = 200
 
@@ -57,6 +58,7 @@ def handler_factory(stub: Stub):
                 return self._send({"id": "n%d" % len(stub.adds),
                                    "content": body.get("content"), "type": body.get("type")})
             if self.path == "/mesh/recall":
+                stub.last_recall_body = body
                 return self._send({"results": [
                     {"id": "a", "content": "alpha", "type": "semantic", "score": 0.9},
                     {"id": "b", "content": "beta", "type": "semantic", "score": 0.2},
@@ -99,11 +101,19 @@ class RemoteBackendTests(unittest.TestCase):
         self.assertEqual(self.stub.adds[0]["content"], "the vault is at 0xdead")
         self.assertEqual(self.stub.auth[-1], "Bearer " + TOKEN)
 
-    def test_recall_maps_nodes_and_filters_min_score(self):
+    def test_recall_reranks_locally_and_filters_by_coverage(self):
+        # The service returns no score, so the adapter ranks the candidate set itself
+        # with BM25 and reports IDF coverage: 1.0 for an exact match, and an
+        # unrelated candidate is dropped rather than ordered last.
         mesh = remote.RemoteMesh(self.url, token=TOKEN)
         hits = mesh.recall("alpha", top_k=5, min_score=0.5)
         self.assertEqual([h.id for h in hits], ["a"])
-        self.assertAlmostEqual(hits[0].score, 0.9)
+        self.assertAlmostEqual(hits[0].score, 1.0)
+
+    def test_recall_asks_for_a_wide_candidate_set(self):
+        mesh = remote.RemoteMesh(self.url, token=TOKEN)
+        mesh.recall("alpha", top_k=2)
+        self.assertGreaterEqual(self.stub.last_recall_body["limit"], 60)
 
     def test_snapshot_feeds_load_for_id_prefix_resolution(self):
         mesh = remote.RemoteMesh(self.url, token=TOKEN)

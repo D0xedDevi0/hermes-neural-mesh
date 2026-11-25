@@ -240,11 +240,26 @@ class RemoteMesh:
         ]
 
     def recall(self, query: str, top_k: int = 10, min_score: float = 0.0) -> list:
-        out = self._call("/mesh/recall", {"query": str(query), "limit": int(top_k)})
+        # The service ranks with the core's default dispatch (right record in the top 5
+        # for about half the probes) and returns no score at all. Ask for a wide
+        # candidate set and rerank it here with the same BM25 + IDF-coverage code the
+        # local path uses, so min_score means the same thing against either store.
+        wide = max(int(top_k) * 6, 60)
+        out = self._call("/mesh/recall", {"query": str(query), "limit": wide})
         hits = self._nodes(out.get("results"))
-        if min_score:
-            hits = [h for h in hits if h.score >= float(min_score)]
-        return hits
+        if not hits:
+            return []
+        try:
+            import bm25
+            ranked = bm25.rank(self, str(query), hits, top_k=int(top_k),
+                               min_coverage=float(min_score))
+        except Exception:
+            if min_score:
+                hits = [h for h in hits if getattr(h, "score", 0.0) >= float(min_score)]
+            return hits[: int(top_k)]
+        for cov, node in ranked:
+            node.score = cov
+        return [node for _, node in ranked]
 
     def recall_asof(self, query: str, as_of=None, top_k: int = 10) -> list:
         out = self._call("/mesh/recall_asof",

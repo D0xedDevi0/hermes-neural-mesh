@@ -97,6 +97,23 @@ except Exception:  # loaded as a bare directory
         bm25_rank = None
 
 
+def remote_settings_file(home: str | None = None):
+    """(url, token) from ``$HERMES_HOME/neural-mesh/remote.json``, or ("", "").
+
+    The gateway's dotenv does not reach every process: per-turn workers are started
+    with a private bootstrap that deliberately skips it, so a worker would silently
+    fall back to the local SQLite file while the gateway wrote to the canonical
+    store. A small 0600 file next to the store is readable from both.
+    """
+    try:
+        import json as _json
+        base = Path(home or os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+        cfg = _json.loads((base / "neural-mesh" / "remote.json").read_text())
+        return str(cfg.get("url", "") or "").strip(), str(cfg.get("token", "") or "").strip()
+    except Exception:
+        return "", ""
+
+
 class NeuralMeshProvider(MemoryProvider):
     """Long-term memory from a local mesh. Nothing leaves the machine; nothing is required."""
 
@@ -115,6 +132,11 @@ class NeuralMeshProvider(MemoryProvider):
         # (see remote.py). Unset means the in-process SQLite behaviour is unchanged.
         self._remote_url = str(os.environ.get("NEURAL_MESH_REMOTE_URL", "") or "").strip()
         self._remote_token = str(os.environ.get("NEURAL_MESH_REMOTE_TOKEN", "") or "")
+        # Workers can start without the gateway's dotenv (per-turn workers skip it), so
+        # fall back to a settings file next to the store: {"url": ..., "token": ...}.
+        if not self._remote_url:
+            self._remote_url, _tok = remote_settings_file()
+            self._remote_token = self._remote_token or _tok
 
     def _m(self) -> Any:
         """The calling thread's Mesh handle, created on first use.

@@ -522,3 +522,19 @@ class ProviderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class RemoteSettingsFileTest(unittest.TestCase):
+    def test_reads_url_and_token_from_home(self):
+        import json, os, tempfile
+        tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(tmp, "neural-mesh"), exist_ok=True)
+        with open(os.path.join(tmp, "neural-mesh", "remote.json"), "w") as fh:
+            json.dump({"url": "https://mesh.example.test", "token": "t0ken"}, fh)
+        url, token = nm.remote_settings_file(tmp)
+        self.assertEqual(url, "https://mesh.example.test")
+        self.assertEqual(token, "t0ken")
+
+    def test_missing_file_is_empty_not_an_error(self):
+        import tempfile
+        self.assertEqual(nm.remote_settings_file(tempfile.mkdtemp()), ("", ""))

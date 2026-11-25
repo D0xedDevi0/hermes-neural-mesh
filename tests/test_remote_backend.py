@@ -23,6 +23,7 @@ class Stub:
     def __init__(self):
         self.adds = []
         self.last_recall_body = {}
+        self.add_status = 200
         self.auth = []
         self.verify_status = 200
 
@@ -54,6 +55,8 @@ def handler_factory(stub: Stub):
             stub.auth.append(self.headers.get("Authorization"))
             body = self._body()
             if self.path == "/mesh/add":
+                if stub.add_status != 200:
+                    return self._send({"error": "upstream down"}, stub.add_status)
                 stub.adds.append(body)
                 return self._send({"id": "n%d" % len(stub.adds),
                                    "content": body.get("content"), "type": body.get("type")})
@@ -114,6 +117,16 @@ class RemoteBackendTests(unittest.TestCase):
         mesh = remote.RemoteMesh(self.url, token=TOKEN)
         mesh.recall("alpha", top_k=2)
         self.assertGreaterEqual(self.stub.last_recall_body["limit"], 60)
+
+    def test_502_from_the_proxy_spools_the_write(self):
+        # nginx answering 502 while the service is stopped must queue the write,
+        # not raise: that is the failure the spool exists for.
+        self.stub.add_status = 502
+        mesh = remote.RemoteMesh(self.url, token=TOKEN, spool_path=self.spool)
+        node = mesh.add("queued during outage", type="semantic", provenance="test")
+        self.assertTrue(node.pending)
+        self.assertTrue(node.id.startswith("spool-"))
+        self.assertGreater(os.path.getsize(self.spool), 0)
 
     def test_snapshot_feeds_load_for_id_prefix_resolution(self):
         mesh = remote.RemoteMesh(self.url, token=TOKEN)

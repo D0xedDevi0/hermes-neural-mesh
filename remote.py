@@ -173,6 +173,11 @@ class RemoteMesh:
                 body = resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")[:400]
+            if exc.code in (502, 503, 504):
+                # A reverse proxy in front of a stopped service answers 502/503/504.
+                # That is the same condition as a refused connection, so writes must
+                # spool instead of failing: the node is not lost, just queued.
+                raise RemoteUnavailable(f"{method} {path} -> HTTP {exc.code}: {body[:120]}") from exc
             raise RemoteError(f"{method} {path} -> HTTP {exc.code}: {body}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise RemoteUnavailable(f"{method} {path} unreachable: {exc}") from exc

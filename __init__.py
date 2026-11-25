@@ -293,13 +293,27 @@ class NeuralMeshProvider(MemoryProvider):
         )
 
     def sync_turn(self, user: str, assistant: str, *, session_id: str = "", messages=None) -> None:
-        """Persist a substantive turn as episodic memory. Failures are silent by design."""
+        """Persist a substantive turn as curated facts.
+
+        Storing ``User said: …`` for every turn is what makes a memory store grow
+        without getting smarter: the same sentence then exists twice, once as a
+        blob and once as the fact a later turn corrects. Curate instead, and keep
+        the raw turn only when nothing curated out of it (so an ordinary
+        conversational turn is still findable). Failures are silent by design.
+        """
         if not self._store_turns or self._m() is None:
             return
         try:
-            if self._should_store(user):
+            text = user.strip()
+            if not self._should_store(text):
+                return
+            report = Curator(self._m()).ingest(
+                text, kind="semantic", by="hermes:sync_turn",
+                source=f"session:{self._session_id}",
+            )
+            if report.summary()["total"] == 0:
                 self._m().add(
-                    f"User said: {user.strip()[:2000]}",
+                    f"User said: {text[:2000]}",
                     type=MemoryType.EPISODIC,
                     provenance=f"session:{self._session_id}",
                     by="hermes:sync_turn",

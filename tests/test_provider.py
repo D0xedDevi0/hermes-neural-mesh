@@ -74,6 +74,19 @@ class ProviderTest(unittest.TestCase):
             self.assertNotIn("unknown tool", out.lower(), name)
 
     # ── v0.49: curation + fenced context ───────────────────────────────────────
+    def test_sync_turn_curates_instead_of_storing_blobs(self):
+        self.p.sync_turn("The prod mesh listens on 127.0.0.1:8787.", "noted")
+        stored = [n.content for n in self.p._m()._live_nodes()]
+        self.assertFalse(any(c.startswith("User said:") for c in stored), stored)
+        self.assertTrue(any("127.0.0.1:8787" in c for c in stored), stored)
+
+    def test_sync_turn_keeps_raw_turn_when_nothing_curates(self):
+        self.p.sync_turn(
+            "can you walk me through the deploy flow once more, slowly, and "
+            "explain each step as you go", "sure")
+        stored = [n.content for n in self.p._m()._live_nodes()]
+        self.assertTrue(any(c.startswith("User said:") for c in stored), stored)
+
     def test_pre_compress_curates_facts_not_blobs(self):
         msgs = [{"role": "user", "content": "The deploy branch is main for D0XEDDEV."},
                 {"role": "assistant", "content": "Noted, the deploy branch is main."}]

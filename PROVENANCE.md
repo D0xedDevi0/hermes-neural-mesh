@@ -6,7 +6,7 @@ plugin is dependency-free and reviewable line by line.
 | | |
 | --- | --- |
 | Upstream | https://github.com/D0xedDevi0/NEURAL_MESH |
-| Upstream commit | `0eeccf03` (v0.49.0) — the curation layer (`curate.py`: ADD/UPDATE/NOOP/QUARANTINE, trust guard, restatement detection), tiered context (`tiers.py`: L0/L1/L2 under a hard budget), DATA_ONLY fencing (`fence.py`), and `bench/curation_bench.py`. Builds on `166a46c2` (v0.48.0): entry signatures (EIP-191 over each `entry_hash`, signer injected by the caller), an independently pinned agent-identity registry that verification consults so a signed entry is attributed to a *label* and not merely to a key, registry-head enforcement, signed agent-identity bindings, `/mesh/health` alongside `/health`, and a fix for a hand-maintained `/health` version that had drifted a release behind. Carries the v0.47.0 signature/binding verdict kinds (`signature`, `binding`) and the v0.47.0/v0.48.0 `VerifyReport` fields `signed`/`unsigned`/`unchecked`/`bindings`/`bindings_source`/`unbound_signed`/`unbound_labels`/`bindings_pinned`. The v0.46.0 addition upstream — `scripts/anchor_base.py`, the Base anchor sender/checker — is an operator tool that reads a wallet key and is deliberately NOT vendored. Builds on `d2a4da6d` (v0.40.0) |
+| Upstream commit | `b447dab5` (v0.49.0) — the curation layer (`curate.py`: ADD/UPDATE/NOOP/QUARANTINE, trust guard, restatement detection), tiered context (`tiers.py`: L0/L1/L2 under a hard budget), DATA_ONLY fencing (`fence.py`), and `bench/curation_bench.py`. Builds on `166a46c2` (v0.48.0): entry signatures (EIP-191 over each `entry_hash`, signer injected by the caller), an independently pinned agent-identity registry that verification consults so a signed entry is attributed to a *label* and not merely to a key, registry-head enforcement, signed agent-identity bindings, `/mesh/health` alongside `/health`, and a fix for a hand-maintained `/health` version that had drifted a release behind. Carries the v0.47.0 signature/binding verdict kinds (`signature`, `binding`) and the v0.47.0/v0.48.0 `VerifyReport` fields `signed`/`unsigned`/`unchecked`/`bindings`/`bindings_source`/`unbound_signed`/`unbound_labels`/`bindings_pinned`. The v0.46.0 addition upstream — `scripts/anchor_base.py`, the Base anchor sender/checker — is an operator tool that reads a wallet key and is deliberately NOT vendored. Builds on `d2a4da6d` (v0.40.0) |
 | Upstream version | `neural-mesh` 0.49.0 |
 | License | MIT (see `LICENSE`) |
 | Vendored | `neural_mesh/` — 48 Python files, 459K, plus `py.typed` (PEP 561 marker) |
@@ -27,7 +27,7 @@ wrong public claim, so they are spelled out here:
   repositories, different histories.
 - The upstream **commit** in the table above (`166a46c2`) — where the vendored source came from.
 
-So `v0.49.0`, `0.49.0` and `0eeccf03` are three names for one state, and the catalogue pin is a
+So `v0.49.0`, `0.49.0` and `b447dab5` are three names for one state, and the catalogue pin is a
 fourth, independent id. When reporting a pin, quote the catalogue `sha:` and `version:` **together,
 read from `main`** — not from a working branch and not from a PR's own diff, where a later review
 commit can revert part of what you pushed.

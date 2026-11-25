@@ -76,87 +76,25 @@ DEFAULT_INJECT_MIN_SCORE = 0.25
 TOOL_MIN_SCORE = 0.05
 
 # Retrieval, calibrated by measurement on the 1,638-record YantrikDB corpus
-# (scripts/calibrate_bm25.py). The core's dense/lexical/hybrid dispatch put the
-# right record in the top 5 for 11 of 20 probes; its Okapi BM25 index - already
-# vendored, just not on the default dispatch path - did 19 of 20.
+# (see bm25.py for the numbers). The core's dense/lexical/hybrid dispatch is a
+# 256-dimension hashed bag of tokens and put the right record in the top 5 for
+# 11 of 20 probes; BM25 over the same nodes did 19 of 20.
 #
-# BM25 raw scores scale with corpus size, so a fixed score floor cannot serve a
-# 1-document store and a 5,000-node mesh alike. The floor here is a COVERAGE
-# ratio instead: the matched share of the query's total IDF, counting terms the
-# corpus has never seen at the maximum IDF. That measure is scale-free, and on
-# the same probes it separated cleanly - related 0.745..4.605, unrelated
-# 0.000..0.538 - which is where the two thresholds come from.
+# BM25 scores grow with corpus size, so the floor is a COVERAGE ratio instead of
+# a score: the matched share of the query's total IDF. Measured on the same
+# probes, related questions landed at 0.745-4.605 and unrelated ones at
+# 0.000-0.538, which is where these thresholds come from.
 BM25_INJECT_COVERAGE = 0.60
 BM25_TOOL_COVERAGE = 0.35
-BM25_STOPWORDS = frozenset(
-    """a an the is are was were be been to of in on for with and or this that
-    these those it its as at by from into your you we our not but if then than
-    so do does did doing have has had what which who how where when why can
-    could would should will shall may might must i me my about there here any
-    some""".split()
-)
+BM25_SMALL_STORE = 50  # below this every hit is plausibly the intended one
 
-_DF_CACHE: dict = {}
-
-
-def bm25_terms(text: str) -> list:
-    """Query terms as written, stop-words removed. Used for coverage accounting."""
-    words = re.findall(r"[a-z0-9_./:-]+", (text or "").lower())
-    return [w for w in words if w not in BM25_STOPWORDS]
-
-
-def bm25_query(text: str) -> str:
-    """Query text with stop-words removed, plus singular/plural variants.
-
-    The core tokenizer does not stem, so "bullet" and "bullets" are different
-    terms. Emitting both forms costs one lookup and stops a plural from hiding
-    a memory the user clearly meant.
-    """
-    out = []
-    for w in bm25_terms(text):
-        out.append(w)
-        if len(w) > 3:
-            if w.endswith("s"):
-                out.append(w[:-1])
-            else:
-                out.append(w + "s")
-    return " ".join(dict.fromkeys(out))
-
-
-def _doc_freq(idx):
-    """Document frequencies for an index, cached by (index identity, doc count)."""
-    key = (id(idx), len(getattr(idx, "docs", ()) or ()))
-    hit = _DF_CACHE.get(key)
-    if hit is not None:
-        return hit
-    df: dict = {}
-    n = 0
-    for doc in getattr(idx, "docs", ()) or ():
-        toks = doc if isinstance(doc, list) else str(doc).split()
-        n += 1
-        for t in set(toks):
-            df[t] = df.get(t, 0) + 1
-    if len(_DF_CACHE) > 8:
-        _DF_CACHE.clear()
-    _DF_CACHE[key] = (df, n)
-    return df, n
-
-
-def _query_idf(terms, df, n, matched_only: bool = False):
-    """Total IDF of the query; unseen terms count at the maximum, so partial matches pay."""
-    if not n:
-        return 0.0
-    import math
-
-    max_idf = math.log(1.0 + (n + 0.5) / 0.5)
-    total = 0.0
-    for t in dict.fromkeys(terms):
-        d = df.get(t) or 0
-        if d:
-            total += math.log(1.0 + (n - d + 0.5) / (d + 0.5))
-        elif not matched_only:
-            total += max_idf
-    return total
+try:  # loaded as a package by the host
+    from .bm25 import rank as bm25_rank
+except Exception:  # loaded as a bare directory
+    try:
+        from bm25 import rank as bm25_rank
+    except Exception:  # pragma: no cover - the provider still works without it
+        bm25_rank = None
 
 
 class NeuralMeshProvider(MemoryProvider):
@@ -227,48 +165,26 @@ class NeuralMeshProvider(MemoryProvider):
         return mesh
 
     def _recall(self, query: str, top_k: int, min_score: float = 0.0) -> list:
-        """Ranked hits for `query` from the core's Okapi BM25 index.
+        """Ranked hits for `query`, BM25 first and the core's recall as a fallback.
 
-        Raw BM25 scores are corpus-size dependent, so hits are filtered by IDF
-        coverage rather than by score: the share of the query's information the
-        document actually matches. Below the floor the honest answer is nothing,
-        which is what keeps unrelated prompts from injecting memory.
+        Raw BM25 scores scale with corpus size, so hits are filtered by IDF
+        coverage, not by score. Below the floor the honest answer is nothing,
+        which is what keeps unrelated prompts from injecting memory at all.
         """
         mesh = self._m()
         if mesh is None:
             return []
-        if not (hasattr(mesh, "bm25_recall") and hasattr(mesh, "_bm25_index_for")):
+        if bm25_rank is None or not hasattr(mesh, "_live_nodes"):
             return mesh.recall(query, top_k=top_k, min_score=min_score)  # RemoteMesh and friends
         try:
-            terms = bm25_query(query).split()
-            if not terms:
+            nodes = mesh._live_nodes()
+            if not nodes:
                 return []
-            live = mesh._live_nodes()
-            if not live:
-                return []
-            idx = mesh._bm25_index_for(live)
-            scores = idx.scores(" ".join(terms))
-            if not scores:
-                return []
-            df, n = _doc_freq(idx)
-            # Precision floors only bite once the store is big enough for
-            # collisions to matter. On a handful of memories every hit is
-            # plausibly the one the user meant, and an unseen query term is
-            # usually just missing vocabulary rather than missing evidence -
-            # so the denominator there counts only terms the corpus knows.
-            if n < 50:
+            if len(nodes) < BM25_SMALL_STORE:
                 floor = 0.0
-                total = _query_idf(bm25_terms(query), df, n, matched_only=True)
             else:
                 floor = BM25_INJECT_COVERAGE if float(min_score or 0.0) >= 0.2 else BM25_TOOL_COVERAGE
-                # Coverage counts the words the user actually typed: the plural
-                # variants are a matching aid, not extra evidence to be found.
-                total = _query_idf(bm25_terms(query), df, n)
-            total = _query_idf(terms, df, n)
-            if not total:
-                return []
-            ranked = sorted(range(len(scores)), key=lambda i: -scores[i])[:top_k]
-            return [live[i] for i in ranked if scores[i] > 0 and scores[i] / total >= floor]
+            return [node for _, node in bm25_rank(mesh, query, nodes, top_k=top_k, min_coverage=floor)]
         except Exception:
             return []  # never raise into the host; an empty recall is honest
 

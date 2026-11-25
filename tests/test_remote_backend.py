@@ -118,6 +118,15 @@ class RemoteBackendTests(unittest.TestCase):
         mesh.recall("alpha", top_k=2)
         self.assertGreaterEqual(self.stub.last_recall_body["limit"], 60)
 
+    def test_add_forwards_bitemporal_bounds(self):
+        # valid_from/valid_to are what make a correction scope-correct; the server
+        # drops unknown fields, so the adapter has to put them on the wire.
+        mesh = remote.RemoteMesh(self.url, token=TOKEN)
+        mesh.add("correction", type="semantic", valid_from=1764200000, valid_to=1764300000)
+        sent = self.stub.adds[-1]
+        self.assertEqual(sent["valid_from"], 1764200000)
+        self.assertEqual(sent["valid_to"], 1764300000)
+
     def test_502_from_the_proxy_spools_the_write(self):
         # nginx answering 502 while the service is stopped must queue the write,
         # not raise: that is the failure the spool exists for.

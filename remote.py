@@ -188,7 +188,7 @@ class RemoteMesh:
 
     # -- writes ----------------------------------------------------------
     def add(self, content, type="semantic", provenance="", supersedes="",
-            meta=None, by="") -> Node:
+            meta=None, by="", valid_from=None, valid_to=None) -> Node:
         payload = {
             "content": str(content),
             "type": getattr(type, "value", type) or "semantic",
@@ -197,6 +197,14 @@ class RemoteMesh:
             "meta": dict(meta or {}),
             "by": str(by or ""),
         }
+        # The provider sends bi-temporal bounds on every write; without them a
+        # superseded memory could never be scoped to the window it was true for.
+        for key, value in (("valid_from", valid_from), ("valid_to", valid_to)):
+            if value not in (None, ""):
+                try:
+                    payload[key] = int(value)
+                except (TypeError, ValueError):
+                    payload[key] = str(value)
         if self.spool is not None:
             try:
                 self.pending = self.spool.pending()

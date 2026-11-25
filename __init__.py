@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -73,6 +74,84 @@ MIN_STORE_CHARS = 24  # don't fill long-term memory with "ok"/"thanks"
 MAX_THREAD_HANDLES = 8  # bounded: Hermes uses a handful of long-lived threads
 DEFAULT_INJECT_MIN_SCORE = 0.25
 TOOL_MIN_SCORE = 0.05
+
+# Retrieval, calibrated by measurement on the 1,638-record YantrikDB corpus
+# (scripts/calibrate_bm25.py). The core's dense/lexical/hybrid dispatch put the
+# right record in the top 5 for 11 of 20 probes; its Okapi BM25 index - already
+# vendored, just not on the default dispatch path - did 19 of 20.
+#
+# BM25 raw scores scale with corpus size, so a fixed score floor cannot serve a
+# 1-document store and a 5,000-node mesh alike. The floor here is a COVERAGE
+# ratio instead: the matched share of the query's total IDF, counting terms the
+# corpus has never seen at the maximum IDF. That measure is scale-free, and on
+# the same probes it separated cleanly - related 0.745..4.605, unrelated
+# 0.000..0.538 - which is where the two thresholds come from.
+BM25_INJECT_COVERAGE = 0.60
+BM25_TOOL_COVERAGE = 0.35
+BM25_STOPWORDS = frozenset(
+    """a an the is are was were be been to of in on for with and or this that
+    these those it its as at by from into your you we our not but if then than
+    so do does did doing have has had what which who how where when why can
+    could would should will shall may might must i me my about there here any
+    some""".split()
+)
+
+_DF_CACHE: dict = {}
+
+
+def bm25_query(text: str) -> str:
+    """Query text with stop-words removed, plus singular/plural variants.
+
+    The core tokenizer does not stem, so "bullet" and "bullets" are different
+    terms. Emitting both forms costs one lookup and stops a plural from hiding
+    a memory the user clearly meant.
+    """
+    words = [w for w in re.findall(r"[a-z0-9_./:-]+", (text or "").lower()) if w not in BM25_STOPWORDS]
+    out = []
+    for w in words:
+        out.append(w)
+        if len(w) > 3:
+            if w.endswith("s"):
+                out.append(w[:-1])
+            else:
+                out.append(w + "s")
+    return " ".join(dict.fromkeys(out))
+
+
+def _doc_freq(idx):
+    """Document frequencies for an index, cached by (index identity, doc count)."""
+    key = (id(idx), len(getattr(idx, "docs", ()) or ()))
+    hit = _DF_CACHE.get(key)
+    if hit is not None:
+        return hit
+    df: dict = {}
+    n = 0
+    for doc in getattr(idx, "docs", ()) or ():
+        toks = doc if isinstance(doc, list) else str(doc).split()
+        n += 1
+        for t in set(toks):
+            df[t] = df.get(t, 0) + 1
+    if len(_DF_CACHE) > 8:
+        _DF_CACHE.clear()
+    _DF_CACHE[key] = (df, n)
+    return df, n
+
+
+def _query_idf(terms, df, n, matched_only: bool = False):
+    """Total IDF of the query; unseen terms count at the maximum, so partial matches pay."""
+    if not n:
+        return 0.0
+    import math
+
+    max_idf = math.log(1.0 + (n + 0.5) / 0.5)
+    total = 0.0
+    for t in dict.fromkeys(terms):
+        d = df.get(t) or 0
+        if d:
+            total += math.log(1.0 + (n - d + 0.5) / (d + 0.5))
+        elif not matched_only:
+            total += max_idf
+    return total
 
 
 class NeuralMeshProvider(MemoryProvider):
@@ -141,6 +220,50 @@ class NeuralMeshProvider(MemoryProvider):
                 self._meshes.pop(next(iter(self._meshes)))
             self._meshes[ident] = mesh
         return mesh
+
+    def _recall(self, query: str, top_k: int, min_score: float = 0.0) -> list:
+        """Ranked hits for `query` from the core's Okapi BM25 index.
+
+        Raw BM25 scores are corpus-size dependent, so hits are filtered by IDF
+        coverage rather than by score: the share of the query's information the
+        document actually matches. Below the floor the honest answer is nothing,
+        which is what keeps unrelated prompts from injecting memory.
+        """
+        mesh = self._m()
+        if mesh is None:
+            return []
+        if not (hasattr(mesh, "bm25_recall") and hasattr(mesh, "_bm25_index_for")):
+            return mesh.recall(query, top_k=top_k, min_score=min_score)  # RemoteMesh and friends
+        try:
+            terms = bm25_query(query).split()
+            if not terms:
+                return []
+            live = mesh._live_nodes()
+            if not live:
+                return []
+            idx = mesh._bm25_index_for(live)
+            scores = idx.scores(" ".join(terms))
+            if not scores:
+                return []
+            df, n = _doc_freq(idx)
+            # Precision floors only bite once the store is big enough for
+            # collisions to matter. On a handful of memories every hit is
+            # plausibly the one the user meant, and an unseen query term is
+            # usually just missing vocabulary rather than missing evidence -
+            # so the denominator there counts only terms the corpus knows.
+            if n < 50:
+                floor = 0.0
+                total = _query_idf(terms, df, n, matched_only=True)
+            else:
+                floor = BM25_INJECT_COVERAGE if float(min_score or 0.0) >= 0.2 else BM25_TOOL_COVERAGE
+                total = _query_idf(terms, df, n)
+            total = _query_idf(terms, df, n)
+            if not total:
+                return []
+            ranked = sorted(range(len(scores)), key=lambda i: -scores[i])[:top_k]
+            return [live[i] for i in ranked if scores[i] > 0 and scores[i] / total >= floor]
+        except Exception:
+            return []  # never raise into the host; an empty recall is honest
 
     # ── identity ────────────────────────────────────────────────────────────────
 
@@ -277,7 +400,7 @@ class NeuralMeshProvider(MemoryProvider):
             return cached
         try:
             return self._format(
-                self._m().recall(query, top_k=self._top_k, min_score=self._min_inject_score)
+                self._recall(query, top_k=self._top_k, min_score=BM25_INJECT_COVERAGE)
             )
         except Exception:
             return ""  # fold rather than fail the turn
@@ -289,7 +412,7 @@ class NeuralMeshProvider(MemoryProvider):
             return
         try:
             result = self._format(
-                self._m().recall(query, top_k=self._top_k, min_score=self._min_inject_score)
+                self._recall(query, top_k=self._top_k, min_score=BM25_INJECT_COVERAGE)
             )
         except Exception:
             return
@@ -657,7 +780,7 @@ class NeuralMeshProvider(MemoryProvider):
                 if not query:
                     return "neural-mesh: no query given."
                 k = max(1, min(50, int(args.get("top_k") or self._top_k)))
-                hits = self._m().recall(query, top_k=k, min_score=TOOL_MIN_SCORE)
+                hits = self._recall(query, top_k=k, min_score=BM25_TOOL_COVERAGE)
                 if not hits:
                     return f"NEURAL_MESH: nothing stored matches {query!r}."
                 detail = str(args.get("detail") or "auto")

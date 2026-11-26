@@ -4,6 +4,7 @@ Runs a stub mesh service in-process on 127.0.0.1 and asserts the adapter's
 surface, auth header, failure classes and spool replay.
 """
 
+import importlib.util
 import json
 import os
 import sys
@@ -11,12 +12,42 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import remote  # noqa: E402
 
 TOKEN = "test-token"
+
+# The shape the live service answers /mesh/ledger/verify with (trimmed to one label),
+# so the adapter is tested against the payload it really gets, not a two-key stub.
+VERIFY_OK = {
+    "ok": True,
+    "summary": ("ledger OK \u2014 6369 entries verified over 5520 live memories, 2179 "
+                "adopted, 2342 signed, 2 label(s) bound, 174 signed under an unbound "
+                "label; head #6369; anchored: yes @#6025"),
+    "kind": "", "reason": "", "advice": "", "broken_at": 0, "node_id": "",
+    "checked": 6369, "nodes": 5520, "anchored": True, "anchor_seq": 6025,
+    "sinks": ["/var/lib/neural-mesh/anchors.jsonl"], "sinks_in_store_only": False,
+    "fields": [], "signed": 2342, "unsigned": 4027, "unchecked": 0,
+    "unbound_signed": 174, "unbound_labels": ["gate8"],
+    "bindings_source": "/var/lib/neural-mesh/identities.jsonl",
+}
+
+
+def _provider_module():
+    """Load the plugin the way test_provider.py does: the real tool renderer, not a
+    copy of its assumptions about what a verify report carries."""
+    repo = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo))
+    if os.path.isdir("/opt/hermes"):
+        sys.path.insert(0, "/opt/hermes")
+    spec = importlib.util.spec_from_file_location("nm_provider_remote", repo / "__init__.py")
+    nm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nm)
+    return nm
 
 
 class Stub:
@@ -70,8 +101,8 @@ def handler_factory(stub: Stub):
                 return self._send({"results": [{"id": "a", "content": "alpha"}], "count": 1})
             if self.path == "/mesh/ledger/verify":
                 ok = stub.verify_status == 200
-                return self._send({"ok": ok, "summary": "OK" if ok else "chain break"},
-                                  stub.verify_status)
+                body = dict(VERIFY_OK) if ok else {"ok": False, "summary": "chain break"}
+                return self._send(body, stub.verify_status)
             if self.path == "/mesh/ledger/provenance":
                 return self._send({"witnessed": True, "events": [{"op": "add"}]})
             return self._send({"error": "not found"}, 404)
@@ -209,6 +240,40 @@ class RemoteBackendTests(unittest.TestCase):
         finally:
             remote.urllib.request.urlopen = real
         self.assertEqual(seen["timeout"], remote.DEFAULT_TIMEOUT)
+
+
+    def test_verify_exposes_every_field_the_provider_renders(self):
+        # The provider reads anchored/anchor_seq/sinks on a pass, and kind/reason/
+        # broken_at on a fail, without getattr defaults. An adapter that carried only
+        # ok+summary raised AttributeError the moment remote verify got a timeout long
+        # enough to answer -- the failure the timeout fix uncovered.
+        mesh = remote.RemoteMesh(self.url, token=TOKEN)
+        rep = mesh.verify_memory()
+        self.assertTrue(rep.ok)
+        self.assertTrue(rep.anchored)
+        self.assertEqual(rep.anchor_seq, 6025)
+        self.assertEqual(rep.sinks, ["/var/lib/neural-mesh/anchors.jsonl"])
+        for attr in ("kind", "reason", "advice", "node_id", "checked", "nodes", "broken_at",
+                     "sinks_in_store_only", "fields", "signed", "unsigned", "unchecked",
+                     "unbound_signed", "unbound_labels", "bindings_source"):
+            self.assertTrue(hasattr(rep, attr), attr)
+
+    def test_provider_mesh_verify_renders_the_remote_verdict(self):
+        # End to end over HTTP: the tool an operator actually calls must come back with
+        # a verdict, not an AttributeError.
+        home = tempfile.mkdtemp(prefix="nm-remote-home-")
+        environ = {"NEURAL_MESH_REMOTE_URL": self.url, "NEURAL_MESH_REMOTE_TOKEN": TOKEN}
+        with mock.patch.dict(os.environ, environ):
+            provider = _provider_module().NeuralMeshProvider()
+            provider.initialize("remote-session", hermes_home=home)
+            try:
+                out = provider.handle_tool_call("mesh_verify", {})
+            finally:
+                provider.shutdown()
+        self.assertIn("integrity: OK", out, out)
+        self.assertIn("6369 entries verified over 5520 live memories", out, out)
+        self.assertIn("anchors.jsonl", out, out)
+        self.assertIn("Authorship:", out, out)
 
 
 if __name__ == "__main__":

@@ -130,13 +130,38 @@ class Spool:
 
 
 class VerifyReport:
-    """Shape the provider expects from ``mesh.verify_memory()``."""
+    """Shape the provider expects from ``mesh.verify_memory()``.
+
+    The service answers ``/mesh/ledger/verify`` with the same fields the ledger's own
+    report carries, so this adapter has to expose the same *attribute* surface: the
+    provider renders a passing verdict from ``anchored`` / ``anchor_seq`` / ``sinks``
+    (and the authorship counters), and a failing one from ``kind`` / ``reason`` /
+    ``broken_at``. Exposing only ``ok`` and ``summary`` made remote verification raise
+    ``AttributeError: 'VerifyReport' object has no attribute 'anchored'`` the moment it
+    finally got a timeout long enough to succeed.
+    """
 
     def __init__(self, payload: dict):
         self._payload = dict(payload or {})
         self.ok = bool(self._payload.get("ok"))
-        self.node_id = None
+        self.kind = str(self._payload.get("kind") or "")
+        self.reason = str(self._payload.get("reason") or "")
+        self.advice = str(self._payload.get("advice") or "")
+        self.node_id = self._payload.get("node_id") or None
+        self.checked = int(self._payload.get("checked") or 0)
+        self.nodes = int(self._payload.get("nodes") or 0)
+        self.broken_at = int(self._payload.get("broken_at") or 0)
+        self.anchored = bool(self._payload.get("anchored"))
+        self.anchor_seq = int(self._payload.get("anchor_seq") or 0)
+        self.sinks = list(self._payload.get("sinks") or [])
         self.sinks_in_store_only = bool(self._payload.get("sinks_in_store_only"))
+        self.fields = list(self._payload.get("fields") or [])
+        self.signed = int(self._payload.get("signed") or 0)
+        self.unsigned = int(self._payload.get("unsigned") or 0)
+        self.unchecked = int(self._payload.get("unchecked") or 0)
+        self.unbound_signed = int(self._payload.get("unbound_signed") or 0)
+        self.unbound_labels = list(self._payload.get("unbound_labels") or [])
+        self.bindings_source = str(self._payload.get("bindings_source") or "")
 
     def to_dict(self) -> dict:
         return dict(self._payload)

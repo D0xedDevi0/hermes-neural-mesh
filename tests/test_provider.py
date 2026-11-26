@@ -565,6 +565,21 @@ class RemoteSettingsFileTest(unittest.TestCase):
             same.initialize("s", hermes_home=real, agent_context="cron")
             self.assertEqual(same._remote_url, "https://canonical.example")
 
+    def test_remote_mode_reports_the_endpoint_not_a_local_path(self):
+        # A local path is the rollback copy, not the memory. mesh_stats used to print it
+        # as "store:", so a reader would go looking — or restoring — in the wrong file.
+        home = tempfile.mkdtemp(prefix="nm-remote-")
+        with mock.patch.dict(os.environ, {"NEURAL_MESH_REMOTE_URL": "https://canonical.example",
+                                          "NEURAL_MESH_REMOTE_TOKEN": "t"}):
+            p = nm.NeuralMeshProvider()
+            p.initialize("s", hermes_home=home, agent_context="primary")
+            self.assertIn("canonical.example", p._store_path())
+            self.assertNotIn(home, p._store_path())
+            sig = p.identity_signature()
+            self.assertEqual(sig["provider"], "neural-mesh")
+            self.assertIn("canonical.example", sig["store"])
+            self.assertNotIn(home, sig["store"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

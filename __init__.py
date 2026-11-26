@@ -222,7 +222,10 @@ class NeuralMeshProvider(MemoryProvider):
         return ""
 
     def identity_signature(self) -> dict[str, Any]:
-        return {"provider": PROVIDER_NAME, "store": str(self._store_dir or "")}
+        # Same reasoning as _store_path: when the memory lives behind an endpoint, name
+        # the endpoint instead of a local directory that does not hold it.
+        return {"provider": PROVIDER_NAME,
+                "store": self._remote_url or str(self._store_dir or "")}
 
     # ── lifecycle ───────────────────────────────────────────────────────────────
 
@@ -984,6 +987,11 @@ class NeuralMeshProvider(MemoryProvider):
     def _store_path(self) -> str:
         """Where this agent's memory actually lives — reported by mesh_stats so a user can
         find, back up, or delete it without guessing."""
+        if self._remote_url:
+            # Remote mode: the local dir holds remote.json and (at most) a frozen rollback
+            # copy, not the memories. Reporting that path as "the store" sends a reader —
+            # or a restore — to a file that does not contain their memory.
+            return f"{self._remote_url} (remote)"
         if self._store_file is not None:
             return str(self._store_file)
         return "unknown"

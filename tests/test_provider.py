@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import tempfile
+from unittest import mock
 import threading
 import time
 import unittest
@@ -32,6 +33,13 @@ JUN = "2026-06-01"
 
 class ProviderTest(unittest.TestCase):
     def setUp(self):
+        # Hermetic by construction: an environment that points at a canonical store must
+        # never be able to receive this suite's fixture writes.
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key in ("NEURAL_MESH_REMOTE_URL", "NEURAL_MESH_REMOTE_TOKEN"):
+            os.environ.pop(key, None)
         self.home = tempfile.mkdtemp(prefix="nm-test-")
         self.p = nm.NeuralMeshProvider()
         self.p.initialize("test-session", hermes_home=self.home, agent_context="primary")
@@ -520,10 +528,6 @@ class ProviderTest(unittest.TestCase):
         self.assertEqual(vendored.__version__, declared)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class RemoteSettingsFileTest(unittest.TestCase):
     def test_reads_url_and_token_from_home(self):
         import json, os, tempfile
@@ -538,3 +542,29 @@ class RemoteSettingsFileTest(unittest.TestCase):
     def test_missing_file_is_empty_not_an_error(self):
         import tempfile
         self.assertEqual(nm.remote_settings_file(tempfile.mkdtemp()), ("", ""))
+
+    def test_settings_file_is_read_from_the_home_the_provider_was_given(self):
+        # Regression: __init__ used to read $HERMES_HOME's remote.json whatever
+        # hermes_home was passed to initialize(), so a "local" test provider silently
+        # opened the real canonical store and wrote its fixtures into it.
+        import json, tempfile
+        from unittest import mock
+        real = tempfile.mkdtemp(prefix="nm-realhome-")
+        os.makedirs(os.path.join(real, "neural-mesh"), exist_ok=True)
+        with open(os.path.join(real, "neural-mesh", "remote.json"), "w") as fh:
+            json.dump({"url": "https://canonical.example", "token": "t"}, fh)
+        env = {"HERMES_HOME": real}
+        with mock.patch.dict(os.environ, env):
+            os.environ.pop("NEURAL_MESH_REMOTE_URL", None)
+            other = nm.NeuralMeshProvider()
+            other.initialize("s", hermes_home=tempfile.mkdtemp(prefix="nm-other-"),
+                             agent_context="primary")
+            self.assertEqual(other._remote_url, "")
+            other.shutdown()
+            same = nm.NeuralMeshProvider()
+            same.initialize("s", hermes_home=real, agent_context="cron")
+            self.assertEqual(same._remote_url, "https://canonical.example")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

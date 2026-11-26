@@ -132,11 +132,9 @@ class NeuralMeshProvider(MemoryProvider):
         # (see remote.py). Unset means the in-process SQLite behaviour is unchanged.
         self._remote_url = str(os.environ.get("NEURAL_MESH_REMOTE_URL", "") or "").strip()
         self._remote_token = str(os.environ.get("NEURAL_MESH_REMOTE_TOKEN", "") or "")
-        # Workers can start without the gateway's dotenv (per-turn workers skip it), so
-        # fall back to a settings file next to the store: {"url": ..., "token": ...}.
-        if not self._remote_url:
-            self._remote_url, _tok = remote_settings_file()
-            self._remote_token = self._remote_token or _tok
+        # The settings-file fallback is resolved in initialize(), where the home this
+        # provider was actually given is known. Reading $HERMES_HOME here instead made
+        # every provider - including a test's throwaway one - open the real canonical store.
 
     def _m(self) -> Any:
         """The calling thread's Mesh handle, created on first use.
@@ -238,6 +236,11 @@ class NeuralMeshProvider(MemoryProvider):
         store_dir = Path(home) / PROVIDER_NAME
         store_dir.mkdir(parents=True, exist_ok=True)
         self._store_dir = store_dir
+        # Workers can start without the gateway's dotenv (per-turn workers skip it), so
+        # fall back to a settings file next to THIS provider's store: {"url", "token"}.
+        if not self._remote_url:
+            self._remote_url, _tok = remote_settings_file(home)
+            self._remote_token = self._remote_token or _tok
         self._store_file = store_dir / "mesh.db"
 
         # Settings: host kwargs win, then our own saved config, then defaults.

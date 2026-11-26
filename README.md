@@ -145,6 +145,23 @@ normal config surface:
 The runtime passes `recall_top_k` through `initialize()` if you prefer to set it there; host
 kwargs win over the saved file.
 
+### Remote mode (worker instances)
+
+The same provider can talk to a mesh *service* instead of a local file, which is how a worker
+instance shares one canonical store:
+
+```json
+// <hermes_home>/neural-mesh/remote.json
+{"url": "https://api.example.com", "token": "<bearer token>"}
+```
+
+If that file is absent the provider falls back to the gateway dotenv
+(`NEURAL_MESH_REMOTE_URL`, `NEURAL_MESH_REMOTE_TOKEN`). Reads and writes use a 5s timeout so a
+stalled service fails fast; a **deep verify** is O(ledger) — measured 24.8s over the public
+endpoint at 6,369 entries, and it grows with the ledger — so it gets a budget of its own,
+`NEURAL_MESH_VERIFY_TIMEOUT` (seconds, default `300`). A write that cannot reach the service
+is spooled and replayed instead of being lost.
+
 ## Where your memory lives
 
 ```bash
@@ -257,7 +274,9 @@ How it works, and what it touches:
 - Runs **in-process** with the agent in pure Python. It reads no `.env` file, no
   `auth.json`, no browser profile, no keychain, and no other tool's credential store — it
   has no credentials at all.
-- Makes **no network calls**. There is no telemetry, no remote store, no sync.
+- Makes **no network calls** in its default mode: memory stays in the local SQLite file,
+  with no telemetry and no sync. *Remote mode* above is the one exception, and it talks only
+  to the URL you configure — there is no third-party store.
 - Spawns **no child processes** and no Hermes children.
 - Writes only inside its own store directory under the Hermes home, plus the config file
   named above.
@@ -269,7 +288,9 @@ How it works, and what it touches:
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v     # 32 tests, offline, no credentials
+python3 tests/test_provider.py -v           # 44 tests, offline, no credentials
+python3 tests/test_remote_backend.py -v     # 12 tests: HTTP adapter vs an in-process stub
+python3 tests/test_bm25.py -v               # 9 tests: ranking and the coverage floor
 python3 scripts/trust_check.py               # no compiled artifacts, no credential-store paths
 python3 scripts/smoke_ledger_tools.py        # end-to-end: tamper, adopt, external sink
 python3 scripts/calibrate_floor.py           # reproduce the precision-floor table

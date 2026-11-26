@@ -171,6 +171,45 @@ class RemoteBackendTests(unittest.TestCase):
         mesh = remote.RemoteMesh(self.url, token=TOKEN)
         self.assertEqual(mesh.stats()["total_nodes"], 3)
 
+    def test_verify_gets_a_timeout_long_enough_for_a_deep_scan(self):
+        # Measured: a deep verify of 6,369 entries takes ~24.8s over the public
+        # endpoint, and it grows with the ledger. With the 5s request default the
+        # client always gave up before the service answered, so verify_memory needs
+        # a budget of its own.
+        seen = {}
+        real = remote.urllib.request.urlopen
+
+        def fake(req, timeout=None):
+            seen["timeout"] = timeout
+            raise OSError("stop after recording the timeout")
+
+        remote.urllib.request.urlopen = fake
+        try:
+            with self.assertRaises(remote.RemoteUnavailable):
+                remote.RemoteMesh(self.url, token=TOKEN).verify_memory(deep=True)
+        finally:
+            remote.urllib.request.urlopen = real
+        self.assertIsNotNone(seen["timeout"])
+        self.assertGreaterEqual(seen["timeout"], 60)
+
+    def test_fast_calls_keep_the_short_default(self):
+        # The verify budget must not leak into reads: a recall that hangs is a bug,
+        # not a slow scan.
+        seen = {}
+        real = remote.urllib.request.urlopen
+
+        def fake(req, timeout=None):
+            seen["timeout"] = timeout
+            raise OSError("stop after recording the timeout")
+
+        remote.urllib.request.urlopen = fake
+        try:
+            with self.assertRaises(remote.RemoteUnavailable):
+                remote.RemoteMesh(self.url, token=TOKEN).stats()
+        finally:
+            remote.urllib.request.urlopen = real
+        self.assertEqual(seen["timeout"], remote.DEFAULT_TIMEOUT)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

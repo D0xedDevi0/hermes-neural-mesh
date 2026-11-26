@@ -1,8 +1,12 @@
 """Tests for the provider's BM25 ranking and its coverage floor."""
 
+import os
+import sys
 import unittest
 
-import bm25
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import bm25  # noqa: E402
 
 
 class Node:

@@ -24,6 +24,11 @@ import urllib.error
 import urllib.request
 
 DEFAULT_TIMEOUT = 5.0
+# A deep verify walks the whole ledger and witnesses every live memory. Measured
+# 24.8s over the public endpoint at 6,369 entries, and it grows with the ledger,
+# so the 5s default - right for reads and writes, which must fail fast - made
+# verify_memory the one call that always failed in remote mode.
+VERIFY_TIMEOUT = float(os.environ.get("NEURAL_MESH_VERIFY_TIMEOUT", "300"))
 MAX_SPOOL_BYTES = 8 * 1024 * 1024
 
 
@@ -158,7 +163,8 @@ class RemoteMesh:
         self.pending = 0
 
     # -- transport -------------------------------------------------------
-    def _call(self, path: str, payload: dict | None = None, method: str = "POST") -> dict:
+    def _call(self, path: str, payload: dict | None = None, method: str = "POST",
+              timeout: float | None = None) -> dict:
         url = f"{self.base_url}{path}"
         data = None
         headers = {"Accept": "application/json"}
@@ -169,7 +175,8 @@ class RemoteMesh:
             headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(
+                    req, timeout=self.timeout if timeout is None else float(timeout)) as resp:
                 body = resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")[:400]
@@ -301,7 +308,10 @@ class RemoteMesh:
 
     def verify_memory(self, deep: bool = True) -> VerifyReport:
         try:
-            return VerifyReport(self._call("/mesh/ledger/verify", {"deep": bool(deep)}))
+            # The scan is O(ledger) on the service side, so it gets its own budget
+            # instead of the 5s request default.
+            return VerifyReport(self._call("/mesh/ledger/verify", {"deep": bool(deep)},
+                                           timeout=max(self.timeout, VERIFY_TIMEOUT)))
         except RemoteError as exc:
             if "HTTP 409" in str(exc):
                 return VerifyReport({"ok": False, "summary": str(exc)[:300]})

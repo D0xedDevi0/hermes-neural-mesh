@@ -36,7 +36,24 @@ B = 0.75
 
 
 def tokenize(text):
-    return [t for t in _TOKEN.findall((text or "").lower()) if t not in _STOPS]
+    """Tokens for indexing and for queries.
+
+    A compound joined by "/" is emitted BOTH whole and as its parts. Without that, a
+    document saying "Loopers/community-art" shares no token with a query for
+    "community-art", so its coverage is 0 and the IDF-coverage floor silently drops a
+    memory the store had already ranked 12th of 300 candidates. Measured on the canonical
+    store before this change. Hyphens stay atomic on purpose: "community-art" and
+    "community/art" are different strings, and splitting them turns "art" into a stopword
+    that matches everything.
+    """
+    out = []
+    for t in _TOKEN.findall((text or "").lower()):
+        if t in _STOPS:
+            continue
+        out.append(t)
+        if "/" in t:
+            out.extend(p for p in t.split("/") if len(p) >= 2 and p not in _STOPS)
+    return out
 
 
 def _variants(term):

@@ -63,13 +63,17 @@ if mode == "remote":
 else:
     from neural_mesh import Mesh
     m = Mesh(store)
-rep = m.verify_memory(deep=(mode != "remote"))
+rep = m.verify_memory(deep=True)
 print("     verify ok=%s chain=%s witnessed=%s" % (
     getattr(rep, "ok", None),
     getattr(rep, "chain_ok", getattr(rep, "ledger_ok", "?")),
     getattr(rep, "witnessed", getattr(rep, "observed", "?"))))
 _sum = getattr(rep, "summary", "")
 print("     verify summary:", str(_sum() if callable(_sum) else _sum)[:150])
+_txt = str(_sum() if callable(_sum) else _sum)
+if " over 0 live memories" in _txt:
+    print("     verify covered ZERO live memories - a ledger-only verdict is not enough")
+    raise SystemExit(5)
 raise SystemExit(0 if getattr(rep, "ok", False) else 4)
 PYEOF
 [ $? -eq 0 ] && ok "mesh_verify returned OK" || bad "mesh_verify did not return OK"

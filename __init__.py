@@ -195,7 +195,10 @@ class NeuralMeshProvider(MemoryProvider):
         if mesh is None:
             return []
         if bm25_rank is None or not hasattr(mesh, "_live_nodes"):
-            return mesh.recall(query, top_k=top_k, min_score=min_score)  # RemoteMesh and friends
+            hits = mesh.recall(query, top_k=top_k, min_score=min_score)  # RemoteMesh and friends
+            self._dbg(query=query, store=type(mesh).__name__, mode="core",
+                      n=len(hits), ids=[str(getattr(h, "id", ""))[:8] for h in hits])
+            return hits
         try:
             nodes = mesh._live_nodes()
             if not nodes:
@@ -204,9 +207,23 @@ class NeuralMeshProvider(MemoryProvider):
                 floor = 0.0
             else:
                 floor = BM25_INJECT_COVERAGE if float(min_score or 0.0) >= 0.2 else BM25_TOOL_COVERAGE
-            return [node for _, node in bm25_rank(mesh, query, nodes, top_k=top_k, min_coverage=floor)]
+            hits = [node for _, node in bm25_rank(mesh, query, nodes, top_k=top_k, min_coverage=floor)]
+            self._dbg(query=query, store=type(mesh).__name__, mode="bm25", n=len(nodes),
+                      floor=floor, hits=len(hits), ids=[str(getattr(h, "id", ""))[:8] for h in hits])
+            return hits
         except Exception:
             return []  # never raise into the host; an empty recall is honest
+
+    def _dbg(self, **kw):
+        """Opt-in trace for one recall (NEURAL_MESH_DEBUG=1). Never raises."""
+        if not os.environ.get("NEURAL_MESH_DEBUG"):
+            return
+        try:
+            import json as _j
+            with open("/tmp/nm_recall_debug.jsonl", "a") as f:
+                f.write(_j.dumps(kw) + "\n")
+        except Exception:
+            pass
 
     # ── identity ────────────────────────────────────────────────────────────────
 
